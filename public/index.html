@@ -8,7 +8,7 @@
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-<div class="app">
+<div class="app" id="app" hidden>
   <aside class="sidebar">
     <div class="brand">
       <div class="brand-mark">V</div>
@@ -24,12 +24,34 @@
       <a href="#/assistant" data-route="assistant"><span class="nav-icon">💬</span>AI秘書</a>
       <a href="#/settings" data-route="settings"><span class="nav-icon">⚙️</span>設定</a>
     </nav>
-    <div class="sidebar-foot">v1.0 &mdash; 毎朝5分で経営把握</div>
+    <div class="sidebar-foot">
+      <div id="user-info" class="muted"></div>
+      <button class="btn btn-sm" id="logout-btn" style="margin-top:8px;">ログアウト</button>
+    </div>
   </aside>
   <main class="main" id="main"></main>
 </div>
+
+<div class="login-screen" id="login-screen" hidden>
+  <form class="card login-card" id="login-form">
+    <div class="brand" style="padding:0 0 18px;">
+      <div class="brand-mark">V</div>
+      <div class="brand-name">VTaBridge OS<span>CEO Dashboard</span></div>
+    </div>
+    <label class="form-label">メールアドレス
+      <input class="input" type="email" id="login-email" autocomplete="username" required>
+    </label>
+    <label class="form-label">パスワード
+      <input class="input" type="password" id="login-password" autocomplete="current-password" required>
+    </label>
+    <div id="login-error" class="form-error" hidden></div>
+    <button class="btn btn-primary" type="submit" style="width:100%; margin-top:8px;">ログイン</button>
+    <div class="muted" style="margin-top:12px;">初期アカウントはサーバー起動時のコンソールに表示されます。</div>
+  </form>
+</div>
+
 <div class="chart-tooltip" id="chart-tooltip" hidden></div>
-<script src="js/data.js"></script>
+<script src="js/api.js"></script>
 <script src="js/charts.js"></script>
 <script src="js/app.js"></script>
 </body>

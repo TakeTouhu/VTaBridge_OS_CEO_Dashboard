@@ -51,6 +51,7 @@
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { height: 100%; }
 body {
   font-family: system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
@@ -332,4 +333,40 @@ textarea.input { width: 100%; resize: vertical; }
   .sidebar, .filter-row, .btn, .page-head { display: none !important; }
   .main { padding: 0; }
   body { background: #fff; }
+}
+
+/* ============ login / forms / modal / toast ============ */
+.login-screen {
+  min-height: 100vh; display: flex; align-items: center; justify-content: center;
+  background: var(--page); padding: 20px;
+}
+.login-card { width: 360px; max-width: 100%; }
+.form-label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 12px; color: var(--text-secondary); }
+.form-label .input, .form-label select.input, .form-label textarea.input { display: block; width: 100%; margin-top: 4px; font-weight: 400; box-sizing: border-box; }
+.form-error { color: var(--status-critical); font-size: 13px; margin-bottom: 8px; }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+@media (max-width: 720px) { .form-grid { grid-template-columns: 1fr; } }
+
+.modal-backdrop {
+  position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 40;
+  display: flex; align-items: flex-start; justify-content: center; padding: 48px 16px;
+  overflow-y: auto;
+}
+.modal { width: 560px; max-width: 100%; }
+.modal h2 { margin-bottom: 16px; }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+
+.toast {
+  position: fixed; bottom: 24px; left: 50%; transform: translate(-50%, 16px);
+  background: var(--text-primary); color: var(--page);
+  padding: 10px 20px; border-radius: 10px; font-size: 13.5px; font-weight: 600;
+  opacity: 0; transition: .25s; z-index: 60; pointer-events: none; max-width: 90vw;
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+.toast-error { background: var(--status-critical); color: #fff; }
+
+.inline-edit { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.ai-badge {
+  display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600;
+  padding: 2px 8px; border-radius: 999px; background: var(--accent-wash); color: var(--accent);
 }
