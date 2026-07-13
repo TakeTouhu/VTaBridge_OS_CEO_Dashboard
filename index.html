@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VTaBridge OS - CEO Dashboard</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232a78d6'/%3E%3Ctext x='16' y='23' font-size='19' font-weight='700' font-family='sans-serif' fill='%23fff' text-anchor='middle'%3EV%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">V</div>
+      <div class="brand-name">VTaBridge OS<span>CEO Dashboard</span></div>
+    </div>
+    <nav class="nav" id="nav">
+      <a href="#/home" data-route="home"><span class="nav-icon">🏠</span>ホーム</a>
+      <a href="#/projects" data-route="projects"><span class="nav-icon">📁</span>案件一覧</a>
+      <a href="#/deals" data-route="deals"><span class="nav-icon">🤝</span>商談</a>
+      <a href="#/analytics" data-route="analytics"><span class="nav-icon">📊</span>売上分析</a>
+      <a href="#/minutes" data-route="minutes"><span class="nav-icon">📝</span>AI議事録取込</a>
+      <a href="#/documents" data-route="documents"><span class="nav-icon">📄</span>書類作成</a>
+      <a href="#/assistant" data-route="assistant"><span class="nav-icon">💬</span>AI秘書</a>
+      <a href="#/settings" data-route="settings"><span class="nav-icon">⚙️</span>設定</a>
+    </nav>
+    <div class="sidebar-foot">v1.0 &mdash; 毎朝5分で経営把握</div>
+  </aside>
+  <main class="main" id="main"></main>
+</div>
+<div class="chart-tooltip" id="chart-tooltip" hidden></div>
+<script src="js/data.js"></script>
+<script src="js/charts.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
