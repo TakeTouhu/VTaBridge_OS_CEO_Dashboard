@@ -3,6 +3,9 @@ const path = require("path");
 const fs = require("fs");
 const Database = require("better-sqlite3");
 
+/* リポジトリ直下の .env を読み込む(既に設定済みの環境変数が優先される) */
+try { process.loadEnvFile(path.join(__dirname, "..", ".env")); } catch { /* .env が無ければ環境変数のみで動作 */ }
+
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "..", "data");
 fs.mkdirSync(DATA_DIR, { recursive: true });
 

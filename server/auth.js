@@ -5,25 +5,47 @@ const { db } = require("./db");
 
 const SESSION_TTL_DAYS = 7;
 
-/* 初回起動時の管理者作成。パスワードは環境変数、無ければ生成してコンソールに一度だけ表示 */
+/* 管理者アカウントの準備。
+   - 初回起動(ユーザー0件): ADMIN_EMAIL / ADMIN_PASSWORD(無ければ生成)で作成
+   - 2回目以降: ADMIN_EMAIL と ADMIN_PASSWORD が両方設定されていれば、その内容に同期
+     (メールアドレスのユーザーが無ければ作成し、パスワードを設定値に合わせる)。
+     .env や環境変数を変えるだけでログイン情報を固定・変更できる。 */
 function ensureAdmin() {
-  const count = db.prepare("SELECT COUNT(*) AS n FROM users").get().n;
-  if (count > 0) return;
-  const email = process.env.ADMIN_EMAIL || "admin@example.com";
-  const password = process.env.ADMIN_PASSWORD || crypto.randomBytes(9).toString("base64url");
+  const envEmail = (process.env.ADMIN_EMAIL || "").trim().toLowerCase();
+  const envPassword = process.env.ADMIN_PASSWORD || "";
   const name = process.env.ADMIN_NAME || "社長";
-  db.prepare("INSERT INTO users (email, name, password_hash) VALUES (?, ?, ?)")
-    .run(email, name, bcrypt.hashSync(password, 10));
-  console.log("========================================");
-  console.log("初期管理者アカウントを作成しました:");
-  console.log(`  email:    ${email}`);
-  if (!process.env.ADMIN_PASSWORD) {
-    console.log(`  password: ${password}`);
-    console.log("  (自動生成。ログイン後の変更を推奨。ADMIN_PASSWORD 環境変数でも指定可能)");
-  } else {
-    console.log("  password: (ADMIN_PASSWORD 環境変数の値)");
+  const count = db.prepare("SELECT COUNT(*) AS n FROM users").get().n;
+
+  if (count === 0) {
+    const email = envEmail || "admin@example.com";
+    const password = envPassword || crypto.randomBytes(9).toString("base64url");
+    db.prepare("INSERT INTO users (email, name, password_hash) VALUES (?, ?, ?)")
+      .run(email, name, bcrypt.hashSync(password, 10));
+    console.log("========================================");
+    console.log("初期管理者アカウントを作成しました:");
+    console.log(`  email:    ${email}`);
+    if (!envPassword) {
+      console.log(`  password: ${password}`);
+      console.log("  (自動生成。ログイン後の変更を推奨。ADMIN_PASSWORD でも指定可能)");
+    } else {
+      console.log("  password: (ADMIN_PASSWORD の設定値)");
+    }
+    console.log("========================================");
+    return;
   }
-  console.log("========================================");
+
+  if (envEmail && envPassword) {
+    const user = db.prepare("SELECT * FROM users WHERE email = ?").get(envEmail);
+    if (!user) {
+      db.prepare("INSERT INTO users (email, name, password_hash) VALUES (?, ?, ?)")
+        .run(envEmail, name, bcrypt.hashSync(envPassword, 10));
+      console.log(`管理者アカウント ${envEmail} を作成しました(ADMIN_EMAIL / ADMIN_PASSWORD の設定値)`);
+    } else if (!bcrypt.compareSync(envPassword, user.password_hash)) {
+      db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(bcrypt.hashSync(envPassword, 10), user.id);
+      db.prepare("DELETE FROM sessions WHERE user_id = ?").run(user.id);
+      console.log(`管理者アカウント ${envEmail} のパスワードを ADMIN_PASSWORD の設定値に同期しました`);
+    }
+  }
 }
 
 /* 単純なログイン試行レート制限(IPごと・15分で10回) */
