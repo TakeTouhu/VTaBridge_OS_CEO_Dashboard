@@ -39,6 +39,7 @@ function projectWithDetails(p) {
     tasks: db.prepare("SELECT * FROM project_tasks WHERE project_id = ? ORDER BY done, due IS NULL, due, id").all(p.id),
     events: db.prepare("SELECT * FROM project_events WHERE project_id = ? ORDER BY date DESC, id DESC LIMIT 30").all(p.id),
     invoices: db.prepare("SELECT * FROM invoices WHERE project_id = ? ORDER BY id DESC").all(p.id),
+    emails: db.prepare("SELECT id, from_name, from_address, subject, received_at, category, urgency, status, needs_reply FROM emails WHERE project_id = ? ORDER BY received_at DESC LIMIT 20").all(p.id),
   };
 }
 
@@ -66,6 +67,7 @@ function registerApiRoutes(app) {
       pipeline: metrics.pipeline(),
       engineers: db.prepare("SELECT * FROM engineers WHERE active = 1 ORDER BY load DESC").all(),
       suggestions: metrics.suggestions(),
+      inbox: metrics.inbox(),
       ai: ai.aiStatus(),
     });
   });
@@ -356,15 +358,16 @@ function registerApiRoutes(app) {
     if (filter === "needs_reply") where = "e.needs_reply = 1";
     else if (filter === "open") where = "e.needs_reply = 1 AND e.status = 'open'";
     const params = [];
-    if (category && ai.MAIL_CATEGORIES.includes(category)) { where += " AND e.category = ?"; params.push(category); }
+    if (category && ai.getMailCategories().includes(category)) { where += " AND e.category = ?"; params.push(category); }
     res.json({
       emails: db.prepare(`
         SELECT e.id, e.from_address, e.from_name, e.subject, e.received_at, e.category, e.urgency,
-               e.summary, e.needs_reply, e.status, e.classified_by, a.label AS account_label
+               e.summary, e.needs_reply, e.status, e.classified_by, e.project_id, e.attachments, a.label AS account_label
         FROM emails e LEFT JOIN mail_accounts a ON a.id = e.account_id
         WHERE ${where} ORDER BY e.received_at DESC LIMIT 200`).all(...params),
       accounts: db.prepare("SELECT * FROM mail_accounts ORDER BY id").all().map(accountPublic),
-      categories: ai.MAIL_CATEGORIES,
+      categories: ai.getMailCategories(),
+      inbox: metrics.inbox(),
       unrepliedCount: db.prepare("SELECT COUNT(*) AS n FROM emails WHERE needs_reply = 1 AND status = 'open'").get().n,
     });
   });
@@ -403,11 +406,26 @@ function registerApiRoutes(app) {
   app.patch("/api/mail/:id", (req, res) => {
     const m = db.prepare("SELECT * FROM emails WHERE id = ?").get(req.params.id);
     if (!m) throw httpError(404, "メールが見つかりません");
-    const status = req.body?.status;
-    if (!["open", "replied", "dismissed"].includes(status)) throw httpError(400, "不正な状態です");
-    db.prepare("UPDATE emails SET status = ?, replied_at = CASE WHEN ? = 'replied' AND replied_at IS NULL THEN datetime('now') ELSE replied_at END WHERE id = ?")
-      .run(status, status, m.id);
+    const b = req.body || {};
+    if (b.status !== undefined) {
+      if (!["open", "replied", "dismissed"].includes(b.status)) throw httpError(400, "不正な状態です");
+      db.prepare("UPDATE emails SET status = ?, replied_at = CASE WHEN ? = 'replied' AND replied_at IS NULL THEN datetime('now') ELSE replied_at END WHERE id = ?")
+        .run(b.status, b.status, m.id);
+    }
+    if (b.project_id !== undefined) {
+      const pid = b.project_id === null || b.project_id === "" ? null : int(b.project_id, { min: 1, fallback: 0 });
+      if (pid !== null) {
+        if (!db.prepare("SELECT id FROM projects WHERE id = ?").get(pid)) throw httpError(404, "案件が見つかりません");
+        addProjectEvent(pid, `メール「${m.subject}」を紐付け`);
+      }
+      db.prepare("UPDATE emails SET project_id = ? WHERE id = ?").run(pid, m.id);
+    }
     res.json({ ok: true });
+  });
+
+  /* ===== 顧客リレーション ===== */
+  app.get("/api/customers", (req, res) => {
+    res.json({ customers: metrics.customers(), followDays: Number(getSettings().followDays) || 30 });
   });
 
   /* メールアカウント管理 */

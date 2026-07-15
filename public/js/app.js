@@ -60,7 +60,7 @@ else window.addEventListener("DOMContentLoaded", boot);
 const routes = {
   home: renderHome, projects: renderProjects, project: renderProjectDetail,
   deals: renderDeals, deal: renderDealDetail, analytics: renderAnalytics,
-  mail: renderMail, maildetail: renderMailDetail,
+  mail: renderMail, maildetail: renderMailDetail, customers: renderCustomers,
   minutes: renderMinutes, documents: renderDocuments, assistant: renderAssistant, settings: renderSettings,
 };
 
@@ -196,6 +196,16 @@ async function renderHome() {
       </div>
     </div>
 
+    <div class="card section" id="ai-inbox">
+      <h2>📥 AI Inbox <span class="muted">(今日対応すべきもの)</span> <a class="more" href="#/mail">メールを開く</a></h2>
+      <div class="kpi-row" style="grid-template-columns: repeat(4, 1fr);">
+        ${statTile("🔴 至急返信", d.inbox.urgent + " 件", d.inbox.urgent ? "本日対応" : "なし", d.inbox.urgent ? false : true)}
+        ${statTile("🟠 本日返信推奨", d.inbox.today + " 件", "24時間以内")}
+        ${statTile("🟡 今週中", d.inbox.thisWeek + " 件", "時間のあるときに")}
+        ${statTile("🤝 フォロー推奨", d.inbox.follow + " 件", "顧客・見積のフォロー")}
+      </div>
+    </div>
+
     <div class="kpi-row section">
       ${statTile("受注額(今月)", yenToMan(k.orderAmount), orderDelta !== null ? `${orderDelta >= 0 ? "▲" : "▼"} 前月比 ${Math.abs(orderDelta)}%` : "", orderDelta !== null ? orderDelta >= 0 : undefined)}
       ${statTile("請求額(今月)", yenToMan(k.invoicedAmount))}
@@ -309,7 +319,9 @@ async function renderProjects() {
     </div></div>
   `;
 
-  let filter = "すべて", q = "";
+  let filter = "すべて", q = sessionStorage.getItem("projSearch") || "";
+  sessionStorage.removeItem("projSearch");
+  if (q) document.getElementById("proj-search").value = q;
   const body = document.getElementById("proj-body");
   function draw() {
     const rows = projects.filter((p) =>
@@ -427,6 +439,21 @@ async function renderProjectDetail(id) {
             </tbody>
           </table></div>` : `<div class="empty">請求書はまだありません</div>`}
         </div>
+
+        <div class="card">
+          <h2>📧 関連メール <span class="muted">(AIが自動紐付け)</span></h2>
+          ${p.emails && p.emails.length ? `<div class="table-wrap"><table class="data">
+            <thead><tr><th>受信</th><th>差出人</th><th>件名</th><th>カテゴリ</th><th>状態</th></tr></thead>
+            <tbody>${p.emails.map((e) => `
+              <tr class="clickable" data-mail="${e.id}">
+                <td style="white-space:nowrap;">${fmtDateTime(e.received_at)}</td>
+                <td>${esc(e.from_name || e.from_address)}</td>
+                <td>${esc(e.subject)}</td>
+                <td>${categoryBadge(e.category)}</td>
+                <td>${mailStatusBadge(e)}</td>
+              </tr>`).join("")}</tbody>
+          </table></div>` : `<div class="empty">紐付いたメールはありません</div>`}
+        </div>
       </div>
 
       <div style="display:flex; flex-direction:column; gap:16px;">
@@ -446,6 +473,9 @@ async function renderProjectDetail(id) {
       </div>
     </div>
   `;
+
+  document.querySelectorAll("[data-mail]").forEach((tr) =>
+    tr.addEventListener("click", () => { location.hash = "#/mail/" + tr.dataset.mail; }));
 
   document.getElementById("proj-edit").addEventListener("click", async () => {
     const v = await modalForm("案件を編集", [
@@ -666,8 +696,9 @@ async function renderDealDetail(id) {
    メール(AI振り分け・返信ドラフト・返信漏れ監視)
 ============================================================ */
 function urgencyBadge(u) {
-  const map = { "高": "badge-critical", "中": "badge-warning", "低": "badge-neutral" };
-  return `<span class="badge ${map[u] || "badge-neutral"}">緊急度${esc(u)}</span>`;
+  const map = { "至急": ["badge-critical", "🔴"], "高": ["badge-serious", "🟠"], "中": ["badge-warning", "🟡"], "低": ["badge-good", "🟢"] };
+  const [cls, icon] = map[u] || ["badge-neutral", ""];
+  return `<span class="badge ${cls}">${icon} ${esc(u)}</span>`;
 }
 function categoryBadge(c) {
   const map = { "見積依頼": "badge-good", "契約相談": "badge-good", "クレーム": "badge-critical", "請求": "badge-warning", "広告": "badge-neutral", "雑談": "badge-neutral", "質問": "badge-neutral" };
@@ -774,7 +805,9 @@ async function renderMail() {
 }
 
 async function renderMailDetail(id) {
-  const { email: m } = await Api.get(`/api/mail/${id}`);
+  const [{ email: m }, { projects }] = await Promise.all([Api.get(`/api/mail/${id}`), Api.get("/api/projects")]);
+  let attachments = [];
+  try { attachments = JSON.parse(m.attachments || "[]"); } catch { /* 旧データ */ }
 
   $main.innerHTML = `
     ${pageHead(m.subject || "(件名なし)", `${m.from_name || ""} <${m.from_address}>`, `<a href="#/mail">メール</a> / 詳細`)}
@@ -790,8 +823,20 @@ async function renderMailDetail(id) {
           <dl class="kv" style="margin-top:10px;">
             <dt>受信日時</dt><dd>${fmtDateTime(m.received_at)}</dd>
             <dt>受信アカウント</dt><dd>${esc(m.account_label || "サンプル")}</dd>
+            ${m.to_addresses ? `<dt>宛先</dt><dd>${esc(m.to_addresses)}</dd>` : ""}
+            ${m.cc_addresses ? `<dt>CC</dt><dd>${esc(m.cc_addresses)}</dd>` : ""}
+            ${attachments.length ? `<dt>添付</dt><dd>📎 ${attachments.map(esc).join("、")}</dd>` : ""}
             ${m.replied_at ? `<dt>対応日時</dt><dd>${fmtDateTime(m.replied_at)}</dd>` : ""}
           </dl>
+          <div class="inline-edit" style="margin-top:12px;">
+            <span class="muted">関連案件:</span>
+            <select class="input" id="mail-project">
+              <option value="">(紐付けなし)</option>
+              ${projects.map((p) => `<option value="${p.id}" ${p.id === m.project_id ? "selected" : ""}>${esc(p.name)}(${esc(p.client)})</option>`).join("")}
+            </select>
+            <button class="btn btn-sm" id="mail-project-save">保存</button>
+            ${m.project_id ? `<a class="btn btn-sm" href="#/projects/${m.project_id}">📁 案件を開く</a>` : ""}
+          </div>
         </div>
         <div class="card">
           <h2>✉️ 本文</h2>
@@ -826,6 +871,13 @@ async function renderMailDetail(id) {
       </div>
     </div>
   `;
+
+  document.getElementById("mail-project-save").addEventListener("click", async () => {
+    const v = document.getElementById("mail-project").value;
+    await Api.patch(`/api/mail/${m.id}`, { project_id: v ? Number(v) : null });
+    toast(v ? "案件に紐付けました" : "紐付けを解除しました");
+    renderMailDetail(id);
+  });
 
   document.getElementById("draft-gen").addEventListener("click", async () => {
     const btn = document.getElementById("draft-gen");
@@ -865,6 +917,58 @@ async function renderMailDetail(id) {
       renderMailDetail(id);
     });
   }
+}
+
+/* ============================================================
+   顧客(AI Relationship Manager)
+============================================================ */
+async function renderCustomers() {
+  const { customers, followDays } = await Api.get("/api/customers");
+  const followList = customers.filter((c) => c.follow_recommended);
+
+  $main.innerHTML = `
+    ${pageHead("顧客", `AIが接触状況を分析し、フォローすべき顧客を提案します(しきい値: 最終接触から${followDays}日)`)}
+    ${followList.length ? `<div class="card section" style="border-color: var(--status-serious);">
+      <h2>🤝 フォロー推奨</h2>
+      ${followList.map((c) => `
+        <div class="ai-item">
+          <span class="ai-icon">📞</span>
+          <div class="a-text"><b>${esc(c.client)}</b> — 最終接触から${c.days_since_contact}日経過。フォローを推奨します。
+          <div class="a-reason">最終商談: ${esc(c.lastDealAt || "-")} / 最終メール: ${esc(c.lastMailAt || "-")}</div></div>
+        </div>`).join("")}
+    </div>` : ""}
+    <div class="card"><div class="table-wrap">
+      <table class="data">
+        <thead><tr>
+          <th>顧客名</th><th>状況</th><th class="num">案件数</th><th class="num">商談回数</th><th class="num">契約件数</th>
+          <th class="num">売上(入金済)</th><th>最終商談</th><th>最終メール</th><th>最終接触</th><th></th>
+        </tr></thead>
+        <tbody>
+          ${customers.length ? customers.map((c) => `
+            <tr class="clickable" data-client="${esc(c.client)}">
+              <td style="font-weight:600;">${esc(c.client)}</td>
+              <td>${statusBadge(c.status)}</td>
+              <td class="num">${c.projectCount}</td>
+              <td class="num">${c.dealCount}</td>
+              <td class="num">${c.wonCount}</td>
+              <td class="num">${esc(yenToMan(c.sales))}</td>
+              <td>${esc(c.lastDealAt || "-")}</td>
+              <td>${esc(c.lastMailAt || "-")}</td>
+              <td>${c.days_since_contact !== null ? `${c.days_since_contact}日前` : "-"}</td>
+              <td>${c.follow_recommended ? `<span class="badge badge-serious">フォロー推奨</span>` : `<span class="badge badge-good">良好</span>`}</td>
+            </tr>`).join("") : `<tr><td colspan="10" class="empty">顧客データがありません(案件・商談を登録すると自動で集計されます)</td></tr>`}
+        </tbody>
+      </table>
+    </div></div>
+    <div class="muted" style="margin-top:10px;">行をクリックすると、その顧客の案件一覧を表示します。最終接触は商談活動・メール・案件更新の最新日時から自動算出しています。</div>
+  `;
+
+  document.querySelectorAll("tr.clickable").forEach((tr) => {
+    tr.addEventListener("click", () => {
+      sessionStorage.setItem("projSearch", tr.dataset.client);
+      location.hash = "#/projects";
+    });
+  });
 }
 
 /* ============================================================
@@ -1230,11 +1334,26 @@ async function renderSettings() {
             ${[4, 8, 24, 48, 72].map((v) => `<option value="${v}" ${Number(settings.mailReplyHours) === v ? "selected" : ""}>${v}時間</option>`).join("")}
           </select>
         </div>
+        <div class="setting-row">
+          <div><div class="s-name">顧客フォロー推奨</div><div class="s-desc">最終接触からこの日数で「フォロー推奨」に</div></div>
+          <select class="input" data-setting="followDays">
+            ${[14, 30, 60, 90].map((v) => `<option value="${v}" ${Number(settings.followDays) === v ? "selected" : ""}>${v}日</option>`).join("")}
+          </select>
+        </div>
+        <div class="setting-row">
+          <div><div class="s-name">見積フォロー推奨</div><div class="s-desc">見積提出からこの日数でフォローを提案</div></div>
+          <select class="input" data-setting="quoteFollowDays">
+            ${[3, 5, 7, 14].map((v) => `<option value="${v}" ${Number(settings.quoteFollowDays) === v ? "selected" : ""}>${v}日</option>`).join("")}
+          </select>
+        </div>
       </div>
+      <label class="form-label" style="margin-top:8px;">メール分類カテゴリ(カンマ区切り・追加/変更可)
+        <input class="input" id="mail-categories" value="${esc(settings.mailCategories || "")}">
+      </label>
       <label class="form-label" style="margin-top:8px;">メール署名(AI返信ドラフトの末尾に使用)
         <textarea class="input" id="mail-signature" rows="3" placeholder="例: 株式会社VTaBridge 山田太郎&#10;TEL: 03-xxxx-xxxx">${esc(settings.mailSignature || "")}</textarea>
       </label>
-      <button class="btn btn-primary btn-sm" id="mail-signature-save">署名を保存</button>
+      <button class="btn btn-primary btn-sm" id="mail-signature-save">署名・カテゴリを保存</button>
     </div>
 
     <div class="grid grid-2" style="margin-top:16px;">
@@ -1338,8 +1457,11 @@ async function renderSettings() {
     });
   });
   document.getElementById("mail-signature-save").addEventListener("click", async () => {
-    await Api.patch("/api/settings", { mailSignature: document.getElementById("mail-signature").value });
-    toast("署名を保存しました");
+    await Api.patch("/api/settings", {
+      mailSignature: document.getElementById("mail-signature").value,
+      mailCategories: document.getElementById("mail-categories").value,
+    });
+    toast("署名・カテゴリを保存しました");
   });
 
   document.getElementById("eng-add").addEventListener("click", async () => {

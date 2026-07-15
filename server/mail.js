@@ -80,14 +80,17 @@ async function syncAccount(acc) {
           try { parsed = await simpleParser(msg.source); } catch { /* パース失敗時はenvelopeのみで登録 */ }
           const env = msg.envelope || {};
           const fromObj = (env.from && env.from[0]) || {};
+          const addrList = (list) => (list || []).map((a) => a.address).filter(Boolean).join(", ").slice(0, 500);
           const body = (parsed?.text || parsed?.html?.replace(/<[^>]+>/g, " ") || "").trim().slice(0, MAX_BODY_CHARS);
+          const attachments = JSON.stringify((parsed?.attachments || []).map((a) => a.filename || "添付ファイル").slice(0, 20));
+          const threadRef = (env.inReplyTo || parsed?.references?.[0] || "").slice(0, 300);
           const receivedAt = (env.date ? new Date(env.date) : new Date()).toISOString();
           try {
             const info = db.prepare(`
-              INSERT OR IGNORE INTO emails (account_id, uid, message_id, from_address, from_name, subject, body, received_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+              INSERT OR IGNORE INTO emails (account_id, uid, message_id, from_address, from_name, to_addresses, cc_addresses, subject, body, attachments, thread_ref, received_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
               .run(acc.id, msg.uid, env.messageId || "", fromObj.address || "", fromObj.name || "",
-                env.subject || "(件名なし)", body, receivedAt);
+                addrList(env.to), addrList(env.cc), env.subject || "(件名なし)", body, attachments, threadRef, receivedAt);
             if (info.changes > 0) inserted.push(info.lastInsertRowid);
           } catch (e) {
             console.error("[mail] insert failed:", e.message);
@@ -113,8 +116,8 @@ async function syncAccount(acc) {
     if (!mail) continue;
     try {
       const c = await ai.classifyEmail(mail);
-      db.prepare("UPDATE emails SET category = ?, urgency = ?, summary = ?, needs_reply = ?, classified_by = ? WHERE id = ?")
-        .run(c.category, c.urgency, c.summary, c.needs_reply ? 1 : 0, c.source, id);
+      db.prepare("UPDATE emails SET category = ?, urgency = ?, summary = ?, needs_reply = ?, classified_by = ?, project_id = COALESCE(?, project_id) WHERE id = ?")
+        .run(c.category, c.urgency, c.summary, c.needs_reply ? 1 : 0, c.source, c.project_id || null, id);
     } catch (e) {
       console.error("[mail] classify failed:", e.message);
     }

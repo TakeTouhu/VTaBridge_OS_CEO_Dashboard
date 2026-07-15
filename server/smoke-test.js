@@ -125,6 +125,10 @@ async function waitForServer() {
   check("存在しないメールのドラフトは404", r.status === 404);
   r = await api("DELETE", `/api/mail/accounts/${accId}`);
   check("アカウント削除", r.status === 200);
+  r = await api("GET", "/api/customers");
+  check("顧客リレーション取得", r.status === 200 && Array.isArray(r.data.customers));
+  r = await api("GET", "/api/dashboard");
+  check("AI Inboxカウント", r.data.inbox && typeof r.data.inbox.urgent === "number");
 
   // パスワード変更 → 旧パスワードは無効
   r = await api("POST", "/api/auth/password", { current: "test-password-1", next: "new-password-99" });

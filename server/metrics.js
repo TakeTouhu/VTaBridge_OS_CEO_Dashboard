@@ -121,9 +121,35 @@ function detectRisks() {
       AND datetime(received_at) <= datetime('now', ?)`).all(`-${replyHours} hours`)) {
     const hours = Math.floor((Date.now() - new Date(m.received_at)) / 3600000);
     risks.push({
-      level: m.urgency === "高" ? "critical" : "serious", type: "返信漏れ",
+      level: ["至急", "高"].includes(m.urgency) ? "critical" : "serious", type: "返信漏れ",
       text: `${m.from_name || m.from_address}「${m.subject}」(${m.category})に${hours}時間未返信`,
-      link: `#/mail/${m.id}`, sort: 70 + (m.urgency === "高" ? 30 : 0) + Math.min(hours, 48),
+      link: `#/mail/${m.id}`, sort: 70 + (["至急", "高"].includes(m.urgency) ? 30 : 0) + Math.min(hours, 48),
+    });
+  }
+  // クレームの兆候: クレーム分類の未対応メールは経過時間に関わらず即検知
+  for (const m of db.prepare("SELECT * FROM emails WHERE category = 'クレーム' AND status = 'open'").all()) {
+    risks.push({
+      level: "critical", type: "クレーム",
+      text: `${m.from_name || m.from_address}からクレームの可能性: 「${m.subject}」`,
+      link: `#/mail/${m.id}`, sort: 130,
+    });
+  }
+  // 放置案件: 開発中なのに2週間更新がない
+  for (const p of db.prepare("SELECT * FROM projects WHERE status = '開発中' AND datetime(updated_at) <= datetime('now', '-14 days')").all()) {
+    const days = daysBetween(p.updated_at.slice(0, 10), t);
+    risks.push({
+      level: "warning", type: "放置案件",
+      text: `${p.name}(${p.client})が${days}日間更新されていません`,
+      link: `#/projects/${p.id}`, sort: 25 + Math.min(days, 30),
+    });
+  }
+  // 契約未締結: 契約待ちの案件が1週間以上滞留
+  for (const p of db.prepare("SELECT * FROM projects WHERE status = '契約待ち' AND datetime(updated_at) <= datetime('now', '-7 days')").all()) {
+    const days = daysBetween(p.updated_at.slice(0, 10), t);
+    risks.push({
+      level: "serious", type: "契約未締結",
+      text: `${p.name}(${p.client})の契約が${days}日間未締結のままです`,
+      link: `#/projects/${p.id}`, sort: 55 + Math.min(days, 30),
     });
   }
   // フォロー滞留: 活動が止まっている進行中の商談(未返信の検知)
@@ -160,12 +186,12 @@ function todayTasks() {
     candidates.push({ id: r.id, kind: "task", title: r.title, why, link: `#/projects/${r.project_id}`, score });
   }
   // 緊急度の高い未返信メール
-  for (const m of db.prepare("SELECT * FROM emails WHERE needs_reply = 1 AND status = 'open' AND urgency = '高'").all()) {
+  for (const m of db.prepare("SELECT * FROM emails WHERE needs_reply = 1 AND status = 'open' AND urgency IN ('至急', '高')").all()) {
     const hours = Math.floor((Date.now() - new Date(m.received_at)) / 3600000);
     candidates.push({
       id: null, kind: "mail", title: `${m.from_name || m.from_address}「${m.subject}」への返信`,
-      why: `緊急度「高」の${m.category}メール。受信から${hours}時間経過`,
-      link: `#/mail/${m.id}`, score: 55 + Math.min(hours, 24),
+      why: `緊急度「${m.urgency}」の${m.category}メール。受信から${hours}時間経過`,
+      link: `#/mail/${m.id}`, score: (m.urgency === "至急" ? 70 : 55) + Math.min(hours, 24),
     });
   }
   // 契約待ちの商談は成約直前 → 高優先
@@ -219,7 +245,83 @@ function suggestions() {
       reason: "請求書ドラフトの滞留検知",
     });
   }
-  return out.slice(0, 3);
+  // 営業アドバイス: 見積提出後のフォロー
+  const s2 = getSettings();
+  const quoteDays = Number(s2.quoteFollowDays) || 5;
+  for (const d of db.prepare(`SELECT * FROM deals WHERE stage = '見積提出' AND datetime(last_activity_at) <= datetime('now', ?) LIMIT 2`).all(`-${quoteDays} days`)) {
+    const days = Math.floor((Date.now() - new Date(d.last_activity_at)) / 86400000);
+    out.push({
+      icon: "📞",
+      text: `${d.client}「${d.title}」は見積提出後${days}日経過しています。フォロー連絡を推奨します。返信が遅れると失注リスクが高まります。`,
+      reason: "見積提出後の経過日数",
+    });
+  }
+  // 営業アドバイス: 疎遠になっている顧客のフォロー
+  const follow = customers().filter((c) => c.follow_recommended).slice(0, 1);
+  for (const c of follow) {
+    out.push({
+      icon: "🤝",
+      text: `${c.client}は最終接触から${c.days_since_contact}日経過しています。フォローを推奨します。`,
+      reason: "顧客リレーション分析",
+    });
+  }
+  return out.slice(0, 4);
+}
+
+/* ===== AI Inbox: 今日対応すべき件数のサマリー ===== */
+function inbox() {
+  const cnt = (u) => db.prepare("SELECT COUNT(*) AS n FROM emails WHERE needs_reply = 1 AND status = 'open' AND urgency = ?").get(u).n;
+  const followCount = customers().filter((c) => c.follow_recommended).length
+    + db.prepare(`SELECT COUNT(*) AS n FROM deals WHERE stage = '見積提出' AND datetime(last_activity_at) <= datetime('now', ?)`)
+        .get(`-${Number(getSettings().quoteFollowDays) || 5} days`).n;
+  return {
+    urgent: cnt("至急"),
+    today: cnt("高"),
+    thisWeek: cnt("中"),
+    follow: followCount,
+  };
+}
+
+/* ===== AI Relationship Manager: 顧客ごとの接触状況・実績集計 ===== */
+function customers() {
+  const followDays = Number(getSettings().followDays) || 30;
+  const names = db.prepare(`
+    SELECT client FROM projects WHERE client != ''
+    UNION SELECT client FROM deals WHERE client != ''`).all().map((r) => r.client);
+  return names.map((client) => {
+    const projects = db.prepare("SELECT id, name, status FROM projects WHERE client = ?").all(client);
+    const pids = projects.map((p) => p.id);
+    const dealAgg = db.prepare("SELECT COUNT(*) AS n, MAX(last_activity_at) AS last FROM deals WHERE client = ?").get(client);
+    const wonCount = db.prepare("SELECT COUNT(*) AS n FROM deals WHERE client = ? AND won_at IS NOT NULL").get(client).n;
+    const sales = pids.length
+      ? db.prepare(`SELECT COALESCE(SUM(amount),0) AS v FROM invoices WHERE paid_at IS NOT NULL AND project_id IN (${pids.map(() => "?").join(",")})`).all(...pids)[0].v
+      : 0;
+    const lastMail = db.prepare(`
+      SELECT MAX(received_at) AS last FROM emails
+      WHERE (project_id IN (${pids.length ? pids.map(() => "?").join(",") : "NULL"}))
+         OR (from_name != '' AND instr(?, from_name) > 0)`)
+      .get(...pids, client)?.last || null;
+    const lastEvent = pids.length
+      ? db.prepare(`SELECT MAX(date) AS last FROM project_events WHERE project_id IN (${pids.map(() => "?").join(",")})`).all(...pids)[0].last
+      : null;
+    const contacts = [dealAgg.last, lastMail, lastEvent].filter(Boolean).map((d) => new Date(d).getTime());
+    const lastContact = contacts.length ? new Date(Math.max(...contacts)) : null;
+    const daysSince = lastContact ? Math.floor((Date.now() - lastContact) / 86400000) : null;
+    const activeStatus = projects.find((p) => p.status !== "完了")?.status || (dealAgg.n ? "商談のみ" : "-");
+    return {
+      client,
+      projectCount: projects.length,
+      dealCount: dealAgg.n,
+      wonCount,
+      sales,
+      lastDealAt: dealAgg.last ? dealAgg.last.slice(0, 10) : null,
+      lastMailAt: lastMail ? lastMail.slice(0, 10) : null,
+      lastContactAt: lastContact ? lastContact.toISOString().slice(0, 10) : null,
+      days_since_contact: daysSince,
+      status: activeStatus,
+      follow_recommended: daysSince !== null && daysSince >= followDays,
+    };
+  }).sort((a, b) => (b.follow_recommended - a.follow_recommended) || (b.sales - a.sales));
 }
 
 /* AI用のビジネスコンテキスト要約(チャットのグラウンディングに使用) */
@@ -243,4 +345,4 @@ function businessContext() {
   ].join("\n");
 }
 
-module.exports = { kpis, monthlySales, pipeline, detectRisks, todayTasks, suggestions, businessContext, ACTIVE_STAGES };
+module.exports = { kpis, monthlySales, pipeline, detectRisks, todayTasks, suggestions, inbox, customers, businessContext, ACTIVE_STAGES };
