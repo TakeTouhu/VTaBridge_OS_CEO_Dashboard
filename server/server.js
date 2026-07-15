@@ -39,6 +39,7 @@ app.use((err, req, res, _next) => {
 ensureAdmin();
 cleanupSessions();
 setInterval(cleanupSessions, 6 * 3600 * 1000).unref();
+require("./mail").startPolling();
 
 const PORT = Number(process.env.PORT) || 3000;
 app.listen(PORT, () => {

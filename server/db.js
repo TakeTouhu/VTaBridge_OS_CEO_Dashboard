@@ -118,6 +118,48 @@ CREATE TABLE IF NOT EXISTS settings (
   value TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS mail_accounts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  label TEXT NOT NULL,
+  provider TEXT NOT NULL DEFAULT 'gmail' CHECK (provider IN ('gmail','outlook','custom')),
+  imap_host TEXT NOT NULL,
+  imap_port INTEGER NOT NULL DEFAULT 993,
+  smtp_host TEXT NOT NULL,
+  smtp_port INTEGER NOT NULL DEFAULT 465,
+  smtp_secure INTEGER NOT NULL DEFAULT 1,
+  username TEXT NOT NULL,
+  password TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1,
+  last_uid INTEGER NOT NULL DEFAULT 0,
+  last_sync_at TEXT,
+  last_error TEXT DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS emails (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  account_id INTEGER REFERENCES mail_accounts(id) ON DELETE CASCADE,
+  uid INTEGER,
+  message_id TEXT DEFAULT '',
+  from_address TEXT NOT NULL DEFAULT '',
+  from_name TEXT DEFAULT '',
+  subject TEXT DEFAULT '',
+  body TEXT DEFAULT '',
+  received_at TEXT NOT NULL DEFAULT (datetime('now')),
+  category TEXT NOT NULL DEFAULT '未分類',
+  urgency TEXT NOT NULL DEFAULT '中' CHECK (urgency IN ('高','中','低')),
+  summary TEXT DEFAULT '',
+  needs_reply INTEGER NOT NULL DEFAULT 0,
+  classified_by TEXT DEFAULT '',
+  draft TEXT DEFAULT '',
+  replied_at TEXT,
+  reply_text TEXT,
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','replied','dismissed')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(account_id, uid)
+);
+CREATE INDEX IF NOT EXISTS idx_emails_status ON emails(status, needs_reply, received_at);
+
 CREATE INDEX IF NOT EXISTS idx_tasks_project ON project_tasks(project_id, done);
 CREATE INDEX IF NOT EXISTS idx_invoices_project ON invoices(project_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON sessions(expires_at);
@@ -130,6 +172,9 @@ const DEFAULT_SETTINGS = {
   autoInput: "1",
   unpaidDays: "7",
   noReplyDays: "3",
+  mailPollMinutes: "5",
+  mailReplyHours: "24",
+  mailSignature: "",
   companyName: "株式会社VTaBridge",
   companyAddress: "東京都○○区○○ 1-2-3",
   bankInfo: "○○銀行 ○○支店 普通 1234567",

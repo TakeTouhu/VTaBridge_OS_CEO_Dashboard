@@ -111,6 +111,21 @@ async function waitForServer() {
   r = await api("PATCH", "/api/settings", { evil: "1" });
   check("不明な設定キーは400", r.status === 400);
 
+  // メール機能
+  r = await api("GET", "/api/mail");
+  check("メール一覧取得(空)", r.status === 200 && Array.isArray(r.data.emails) && r.data.unrepliedCount === 0);
+  r = await api("POST", "/api/mail/sync");
+  check("アカウント未登録の同期は400", r.status === 400);
+  r = await api("POST", "/api/mail/accounts", { provider: "gmail", username: "test@example.com", password: "app-pass" });
+  check("メールアカウント作成(プリセット適用)", r.status === 201 && r.data.account.imap_host === "imap.gmail.com" && r.data.account.password === undefined);
+  const accId = r.data.account.id;
+  r = await api("PATCH", `/api/mail/accounts/${accId}`, { active: false });
+  check("アカウント停止", r.status === 200 && r.data.account.active === 0);
+  r = await api("POST", "/api/mail/999/draft");
+  check("存在しないメールのドラフトは404", r.status === 404);
+  r = await api("DELETE", `/api/mail/accounts/${accId}`);
+  check("アカウント削除", r.status === 200);
+
   // パスワード変更 → 旧パスワードは無効
   r = await api("POST", "/api/auth/password", { current: "test-password-1", next: "new-password-99" });
   check("パスワード変更", r.status === 200);

@@ -11,7 +11,7 @@ if (hasData && !force) {
   process.exit(0);
 }
 if (force) {
-  db.exec("DELETE FROM deal_activities; DELETE FROM deals; DELETE FROM invoices; DELETE FROM project_events; DELETE FROM project_tasks; DELETE FROM projects; DELETE FROM engineers; DELETE FROM documents;");
+  db.exec("DELETE FROM deal_activities; DELETE FROM deals; DELETE FROM invoices; DELETE FROM project_events; DELETE FROM project_tasks; DELETE FROM projects; DELETE FROM engineers; DELETE FROM documents; DELETE FROM emails;");
 }
 
 function d(offsetDays) {
@@ -95,6 +95,26 @@ const tx = db.transaction(() => {
   const insEvent = db.prepare("INSERT INTO project_events (project_id, date, text) VALUES (?, ?, ?)");
   insEvent.run(p4, d(-1), "危険検知: 納期遅延・未回収を検出");
   insEvent.run(p1, d(-3), "AI議事録: 定例MTGからTODO 2件を自動抽出");
+
+  /* サンプルメール(アカウント未登録でも画面を確認できるデモ用・分類済み) */
+  const hoursAgo = (h) => new Date(Date.now() - h * 3600000).toISOString();
+  const insMail = db.prepare(`INSERT INTO emails (from_address, from_name, subject, body, received_at, category, urgency, summary, needs_reply, classified_by, status, replied_at, reply_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'rules', ?, ?, ?)`);
+  insMail.run("mori@aoba.example.co.jp", "アオバ 森", "社内ポータルの御見積のお願い",
+    "お世話になっております。先日ご相談した社内ポータル刷新について、正式に御見積をお願いできますでしょうか。予算会議が今週金曜のため、それまでにいただけると助かります。",
+    hoursAgo(30), "見積依頼", "高", "社内ポータルの見積依頼。今週金曜まで", 1, "open", null, null);
+  insMail.run("hayashi@sakura-mfg.example.jp", "サクラ製作所 林", "【重要】ECサイトの決済でエラーが発生しています",
+    "本日午前より、ECサイトの決済画面でエラーが頻発しています。お客様からの問い合わせも来ており、至急ご確認をお願いします。",
+    hoursAgo(3), "クレーム", "高", "ECサイト決済でエラー発生。至急対応の依頼", 1, "open", null, null);
+  insMail.run("okada@hikari.example.co.jp", "ヒカリ商事 岡田", "追加モジュールの仕様について質問",
+    "在庫管理の追加モジュールについて、バーコード読み取りは標準対応でしょうか?また、既存データの移行は含まれますか?",
+    hoursAgo(50), "質問", "中", "追加モジュールの仕様2点の質問", 1, "open", null, null);
+  insMail.run("keiri@minato-logi.example.jp", "ミナト物流 経理部", "3月分保守費のご請求について",
+    "3月分の保守費用の請求書がまだ届いていないようです。ご確認のうえ、お送りいただけますでしょうか。",
+    hoursAgo(8), "請求", "中", "3月分保守費の請求書送付依頼", 1, "replied", hoursAgo(2),
+    "ミナト物流 経理部 様\n\nお世話になっております。ご指摘ありがとうございます。本日中に請求書をお送りいたします。");
+  insMail.run("newsletter@saas-magazine.example.com", "SaaSマガジン", "【本日限定】業務効率化ツール特集セミナーのご案内",
+    "いつもご購読ありがとうございます。本日限定のオンラインセミナーのご案内です。配信停止はこちら。",
+    hoursAgo(12), "広告", "低", "セミナー案内のメルマガ", 0, "dismissed", null, null);
 });
 tx();
 

@@ -114,6 +114,18 @@ function detectRisks() {
       link: `#/projects/${r.project_id}`, sort: 60,
     });
   }
+  // 返信漏れ: 要返信メールが一定時間未対応
+  const replyHours = Number(s.mailReplyHours) || 24;
+  for (const m of db.prepare(`
+      SELECT * FROM emails WHERE needs_reply = 1 AND status = 'open'
+      AND datetime(received_at) <= datetime('now', ?)`).all(`-${replyHours} hours`)) {
+    const hours = Math.floor((Date.now() - new Date(m.received_at)) / 3600000);
+    risks.push({
+      level: m.urgency === "高" ? "critical" : "serious", type: "返信漏れ",
+      text: `${m.from_name || m.from_address}「${m.subject}」(${m.category})に${hours}時間未返信`,
+      link: `#/mail/${m.id}`, sort: 70 + (m.urgency === "高" ? 30 : 0) + Math.min(hours, 48),
+    });
+  }
   // フォロー滞留: 活動が止まっている進行中の商談(未返信の検知)
   const noReplyDays = Number(s.noReplyDays) || 3;
   for (const d of db.prepare(`
@@ -146,6 +158,15 @@ function todayTasks() {
       else if (dd <= 3) { score += 30 - dd * 5; why = `期限まであと${dd}日。${why}`; }
     }
     candidates.push({ id: r.id, kind: "task", title: r.title, why, link: `#/projects/${r.project_id}`, score });
+  }
+  // 緊急度の高い未返信メール
+  for (const m of db.prepare("SELECT * FROM emails WHERE needs_reply = 1 AND status = 'open' AND urgency = '高'").all()) {
+    const hours = Math.floor((Date.now() - new Date(m.received_at)) / 3600000);
+    candidates.push({
+      id: null, kind: "mail", title: `${m.from_name || m.from_address}「${m.subject}」への返信`,
+      why: `緊急度「高」の${m.category}メール。受信から${hours}時間経過`,
+      link: `#/mail/${m.id}`, score: 55 + Math.min(hours, 24),
+    });
   }
   // 契約待ちの商談は成約直前 → 高優先
   for (const d of db.prepare("SELECT * FROM deals WHERE stage = '契約待ち'").all()) {
@@ -208,6 +229,7 @@ function businessContext() {
   const tasks = todayTasks();
   const pipe = pipeline();
   const eng = db.prepare("SELECT name, current_project, load FROM engineers WHERE active = 1").all();
+  const unreplied = db.prepare("SELECT COUNT(*) AS n FROM emails WHERE needs_reply = 1 AND status = 'open'").get().n;
   const man = (v) => Math.round(v / 10000) + "万円";
   return [
     `本日: ${today()}`,
@@ -217,6 +239,7 @@ function businessContext() {
     `今日の優先タスク: ` + (tasks.map((t) => `${t.title}(${t.why})`).join(" / ") || "なし"),
     `危険案件: ` + (risks.map((r) => `[${r.type}] ${r.text}`).join(" / ") || "なし"),
     `エンジニア稼働: ` + eng.map((e) => `${e.name}${e.load}%${e.current_project ? `(${e.current_project})` : ""}`).join(" / "),
+    `未返信メール: ${unreplied}件`,
   ].join("\n");
 }
 

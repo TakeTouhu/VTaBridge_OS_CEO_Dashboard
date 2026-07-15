@@ -2,6 +2,7 @@
 const { db, getSettings, setSetting, nextDocNumber } = require("./db");
 const metrics = require("./metrics");
 const ai = require("./ai");
+const mail = require("./mail");
 const { requireAuth } = require("./auth");
 
 /* ===== バリデーションヘルパ ===== */
@@ -342,6 +343,123 @@ function registerApiRoutes(app) {
         b.load !== undefined ? int(b.load, { max: 100 }) : e.load,
         b.active !== undefined ? (b.active ? 1 : 0) : e.active,
         e.id);
+    res.json({ ok: true });
+  });
+
+  /* ===== メール ===== */
+  const accountPublic = (a) => ({ ...a, password: undefined });
+
+  app.get("/api/mail", (req, res) => {
+    const filter = String(req.query.filter || "all");
+    const category = String(req.query.category || "");
+    let where = "1=1";
+    if (filter === "needs_reply") where = "e.needs_reply = 1";
+    else if (filter === "open") where = "e.needs_reply = 1 AND e.status = 'open'";
+    const params = [];
+    if (category && ai.MAIL_CATEGORIES.includes(category)) { where += " AND e.category = ?"; params.push(category); }
+    res.json({
+      emails: db.prepare(`
+        SELECT e.id, e.from_address, e.from_name, e.subject, e.received_at, e.category, e.urgency,
+               e.summary, e.needs_reply, e.status, e.classified_by, a.label AS account_label
+        FROM emails e LEFT JOIN mail_accounts a ON a.id = e.account_id
+        WHERE ${where} ORDER BY e.received_at DESC LIMIT 200`).all(...params),
+      accounts: db.prepare("SELECT * FROM mail_accounts ORDER BY id").all().map(accountPublic),
+      categories: ai.MAIL_CATEGORIES,
+      unrepliedCount: db.prepare("SELECT COUNT(*) AS n FROM emails WHERE needs_reply = 1 AND status = 'open'").get().n,
+    });
+  });
+
+  app.post("/api/mail/sync", async (req, res) => {
+    const count = db.prepare("SELECT COUNT(*) AS n FROM mail_accounts WHERE active = 1").get().n;
+    if (count === 0) throw httpError(400, "メールアカウントが登録されていません。設定画面から追加してください");
+    res.json(await mail.syncAll());
+  });
+
+  app.get("/api/mail/:id", (req, res) => {
+    const m = db.prepare(`
+      SELECT e.*, a.label AS account_label, a.username AS account_address
+      FROM emails e LEFT JOIN mail_accounts a ON a.id = e.account_id WHERE e.id = ?`).get(req.params.id);
+    if (!m) throw httpError(404, "メールが見つかりません");
+    res.json({ email: m });
+  });
+
+  app.post("/api/mail/:id/draft", async (req, res) => {
+    const m = db.prepare("SELECT * FROM emails WHERE id = ?").get(req.params.id);
+    if (!m) throw httpError(404, "メールが見つかりません");
+    const result = await ai.draftReply(m, str(req.body?.instructions, { max: 500 }));
+    db.prepare("UPDATE emails SET draft = ? WHERE id = ?").run(result.draft, m.id);
+    res.json(result);
+  });
+
+  app.post("/api/mail/:id/reply", async (req, res) => {
+    const m = db.prepare("SELECT * FROM emails WHERE id = ?").get(req.params.id);
+    if (!m) throw httpError(404, "メールが見つかりません");
+    if (m.status === "replied") throw httpError(400, "既に返信済みです");
+    const text = str(req.body?.text, { max: 20000, required: true });
+    await mail.sendReply(m, text);
+    res.json({ ok: true });
+  });
+
+  app.patch("/api/mail/:id", (req, res) => {
+    const m = db.prepare("SELECT * FROM emails WHERE id = ?").get(req.params.id);
+    if (!m) throw httpError(404, "メールが見つかりません");
+    const status = req.body?.status;
+    if (!["open", "replied", "dismissed"].includes(status)) throw httpError(400, "不正な状態です");
+    db.prepare("UPDATE emails SET status = ?, replied_at = CASE WHEN ? = 'replied' AND replied_at IS NULL THEN datetime('now') ELSE replied_at END WHERE id = ?")
+      .run(status, status, m.id);
+    res.json({ ok: true });
+  });
+
+  /* メールアカウント管理 */
+  function accountFromBody(b, existing = {}) {
+    const provider = ["gmail", "outlook", "custom"].includes(b.provider) ? b.provider : (existing.provider || "gmail");
+    const preset = mail.PROVIDER_PRESETS[provider] || {};
+    return {
+      label: str(b.label, { max: 100 }) || existing.label || b.username || "メール",
+      provider,
+      imap_host: str(b.imap_host, { max: 200 }) || preset.imap_host || existing.imap_host,
+      imap_port: int(b.imap_port, { fallback: preset.imap_port || existing.imap_port || 993 }),
+      smtp_host: str(b.smtp_host, { max: 200 }) || preset.smtp_host || existing.smtp_host,
+      smtp_port: int(b.smtp_port, { fallback: preset.smtp_port || existing.smtp_port || 465 }),
+      smtp_secure: b.smtp_secure !== undefined ? (b.smtp_secure ? 1 : 0)
+        : (preset.smtp_secure !== undefined ? preset.smtp_secure : (existing.smtp_secure ?? 1)),
+      username: str(b.username, { max: 200 }) || existing.username,
+      password: (typeof b.password === "string" && b.password) ? b.password : existing.password,
+    };
+  }
+
+  app.post("/api/mail/accounts", (req, res) => {
+    const a = accountFromBody(req.body || {});
+    if (!a.username || !a.password) throw httpError(400, "メールアドレスとパスワードを入力してください");
+    if (!a.imap_host || !a.smtp_host) throw httpError(400, "サーバー設定が不足しています");
+    const info = db.prepare(`
+      INSERT INTO mail_accounts (label, provider, imap_host, imap_port, smtp_host, smtp_port, smtp_secure, username, password)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(a.label, a.provider, a.imap_host, a.imap_port, a.smtp_host, a.smtp_port, a.smtp_secure, a.username, a.password);
+    res.status(201).json({ account: accountPublic(db.prepare("SELECT * FROM mail_accounts WHERE id = ?").get(info.lastInsertRowid)) });
+  });
+
+  app.post("/api/mail/accounts/test", async (req, res) => {
+    const existing = req.body?.id ? db.prepare("SELECT * FROM mail_accounts WHERE id = ?").get(req.body.id) : {};
+    const a = accountFromBody(req.body || {}, existing || {});
+    if (!a.username || !a.password) throw httpError(400, "メールアドレスとパスワードを入力してください");
+    res.json(await mail.testAccount(a));
+  });
+
+  app.patch("/api/mail/accounts/:id", (req, res) => {
+    const existing = db.prepare("SELECT * FROM mail_accounts WHERE id = ?").get(req.params.id);
+    if (!existing) throw httpError(404, "アカウントが見つかりません");
+    const b = req.body || {};
+    const a = accountFromBody(b, existing);
+    db.prepare(`
+      UPDATE mail_accounts SET label=?, provider=?, imap_host=?, imap_port=?, smtp_host=?, smtp_port=?, smtp_secure=?, username=?, password=?, active=? WHERE id=?`)
+      .run(a.label, a.provider, a.imap_host, a.imap_port, a.smtp_host, a.smtp_port, a.smtp_secure, a.username, a.password,
+        b.active !== undefined ? (b.active ? 1 : 0) : existing.active, existing.id);
+    res.json({ account: accountPublic(db.prepare("SELECT * FROM mail_accounts WHERE id = ?").get(existing.id)) });
+  });
+
+  app.delete("/api/mail/accounts/:id", (req, res) => {
+    db.prepare("DELETE FROM mail_accounts WHERE id = ?").run(req.params.id);
     res.json({ ok: true });
   });
 

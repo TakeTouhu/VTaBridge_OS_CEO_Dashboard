@@ -60,6 +60,7 @@ else window.addEventListener("DOMContentLoaded", boot);
 const routes = {
   home: renderHome, projects: renderProjects, project: renderProjectDetail,
   deals: renderDeals, deal: renderDealDetail, analytics: renderAnalytics,
+  mail: renderMail, maildetail: renderMailDetail,
   minutes: renderMinutes, documents: renderDocuments, assistant: renderAssistant, settings: renderSettings,
 };
 
@@ -70,9 +71,11 @@ async function route() {
   let view = name;
   if (name === "projects" && param) view = "project";
   if (name === "deals" && param) view = "deal";
+  if (name === "mail" && param) view = "maildetail";
   const fn = routes[view] || renderHome;
+  const navKey = view === "project" ? "projects" : view === "deal" ? "deals" : view === "maildetail" ? "mail" : view;
   document.querySelectorAll("#nav a").forEach((a) => {
-    a.classList.toggle("active", a.dataset.route === (view === "project" ? "projects" : view === "deal" ? "deals" : view));
+    a.classList.toggle("active", a.dataset.route === navKey);
   });
   $main.innerHTML = `<div class="empty" style="padding-top:60px;">読み込み中…</div>`;
   try {
@@ -660,6 +663,211 @@ async function renderDealDetail(id) {
 }
 
 /* ============================================================
+   メール(AI振り分け・返信ドラフト・返信漏れ監視)
+============================================================ */
+function urgencyBadge(u) {
+  const map = { "高": "badge-critical", "中": "badge-warning", "低": "badge-neutral" };
+  return `<span class="badge ${map[u] || "badge-neutral"}">緊急度${esc(u)}</span>`;
+}
+function categoryBadge(c) {
+  const map = { "見積依頼": "badge-good", "契約相談": "badge-good", "クレーム": "badge-critical", "請求": "badge-warning", "広告": "badge-neutral", "雑談": "badge-neutral", "質問": "badge-neutral" };
+  return `<span class="badge ${map[c] || "badge-neutral"}">${esc(c)}</span>`;
+}
+function mailStatusBadge(m) {
+  if (m.status === "replied") return `<span class="badge badge-good">返信済</span>`;
+  if (m.status === "dismissed") return `<span class="badge badge-neutral">対応不要</span>`;
+  return m.needs_reply ? `<span class="badge badge-critical">未対応</span>` : `<span class="badge badge-neutral">-</span>`;
+}
+function fmtDateTime(s) {
+  const d = new Date(s);
+  return isNaN(d) ? esc(s || "-") : `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+async function renderMail() {
+  const load = (f, c) => Api.get(`/api/mail?filter=${f}${c ? `&category=${encodeURIComponent(c)}` : ""}`);
+  let data = await load("all", "");
+
+  $main.innerHTML = `
+    ${pageHead("メール", "AIが受信メールを振り分け、返信漏れを監視します")}
+    <div class="filter-row">
+      <div class="seg" id="mail-filter">
+        <button class="on" data-f="all">すべて</button>
+        <button data-f="needs_reply">要返信</button>
+        <button data-f="open">未対応のみ</button>
+      </div>
+      <select class="input" id="mail-category">
+        <option value="">全カテゴリ</option>
+        ${data.categories.map((c) => `<option>${esc(c)}</option>`).join("")}
+      </select>
+      <button class="btn" id="mail-sync" style="margin-left:auto;">📥 今すぐ受信</button>
+      <a class="btn" href="#/settings">⚙ アカウント設定</a>
+    </div>
+    <div id="mail-status-line" class="muted" style="margin-bottom:10px;"></div>
+    <div class="card"><div class="table-wrap">
+      <table class="data">
+        <thead><tr><th>受信</th><th>差出人</th><th>件名 / AI要約</th><th>カテゴリ</th><th>緊急度</th><th>状態</th></tr></thead>
+        <tbody id="mail-body"></tbody>
+      </table>
+    </div></div>
+  `;
+
+  function statusLine() {
+    const el = document.getElementById("mail-status-line");
+    if (!data.accounts.length) {
+      el.innerHTML = `メールアカウントが未登録です。<a href="#/settings">設定画面</a>から Gmail / Outlook を追加してください。`;
+      return;
+    }
+    el.innerHTML = data.accounts.map((a) => {
+      const state = !a.active ? `<span class="badge badge-neutral">停止中</span>`
+        : a.last_error ? `<span class="badge badge-critical">エラー</span> <span class="muted">${esc(a.last_error)}</span>`
+        : `<span class="badge badge-good">監視中</span>`;
+      return `📮 ${esc(a.label)}(${esc(a.username)}) ${state} <span class="muted">${a.last_sync_at ? "最終受信 " + fmtDateTime(a.last_sync_at) : "未受信"}</span>`;
+    }).join("<br>") + ` — 未返信 <b>${data.unrepliedCount}</b> 件`;
+  }
+
+  function drawRows() {
+    const body = document.getElementById("mail-body");
+    body.innerHTML = data.emails.length ? data.emails.map((m) => `
+      <tr class="clickable" data-id="${m.id}" style="${m.needs_reply && m.status === "open" ? "font-weight:600;" : ""}">
+        <td style="white-space:nowrap;">${fmtDateTime(m.received_at)}</td>
+        <td>${esc(m.from_name || m.from_address)}</td>
+        <td>${esc(m.subject)}<br><span class="muted" style="font-weight:400;">${esc(m.summary || "")}</span></td>
+        <td>${categoryBadge(m.category)}</td>
+        <td>${urgencyBadge(m.urgency)}</td>
+        <td>${mailStatusBadge(m)}</td>
+      </tr>`).join("") : `<tr><td colspan="6" class="empty">メールはありません</td></tr>`;
+    body.querySelectorAll("tr.clickable").forEach((tr) =>
+      tr.addEventListener("click", () => { location.hash = "#/mail/" + tr.dataset.id; }));
+  }
+
+  let filter = "all";
+  async function refresh() {
+    data = await load(filter, document.getElementById("mail-category").value);
+    statusLine();
+    drawRows();
+  }
+  document.getElementById("mail-filter").addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    filter = b.dataset.f;
+    document.querySelectorAll("#mail-filter button").forEach((x) => x.classList.toggle("on", x === b));
+    refresh();
+  });
+  document.getElementById("mail-category").addEventListener("change", refresh);
+  document.getElementById("mail-sync").addEventListener("click", async () => {
+    const btn = document.getElementById("mail-sync");
+    btn.disabled = true;
+    btn.textContent = "受信中…";
+    try {
+      const r = await Api.post("/api/mail/sync");
+      toast(r.fetched !== undefined ? `新着 ${r.fetched} 件を取り込みました` : "同期を実行しました");
+      await refresh();
+    } catch (err) {
+      toast(err.message, true);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "📥 今すぐ受信";
+    }
+  });
+  statusLine();
+  drawRows();
+}
+
+async function renderMailDetail(id) {
+  const { email: m } = await Api.get(`/api/mail/${id}`);
+
+  $main.innerHTML = `
+    ${pageHead(m.subject || "(件名なし)", `${m.from_name || ""} <${m.from_address}>`, `<a href="#/mail">メール</a> / 詳細`)}
+    <div class="detail-grid section">
+      <div style="display:flex; flex-direction:column; gap:16px;">
+        <div class="card">
+          <h2>🤖 AIによる振り分け ${m.classified_by ? aiBadge(m.classified_by) : ""}</h2>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
+            ${categoryBadge(m.category)} ${urgencyBadge(m.urgency)} ${mailStatusBadge(m)}
+            ${m.needs_reply ? `<span class="badge badge-warning">要返信</span>` : ""}
+          </div>
+          ${m.summary ? `<div style="font-size:13px;"><b>要約:</b> ${esc(m.summary)}</div>` : ""}
+          <dl class="kv" style="margin-top:10px;">
+            <dt>受信日時</dt><dd>${fmtDateTime(m.received_at)}</dd>
+            <dt>受信アカウント</dt><dd>${esc(m.account_label || "サンプル")}</dd>
+            ${m.replied_at ? `<dt>対応日時</dt><dd>${fmtDateTime(m.replied_at)}</dd>` : ""}
+          </dl>
+        </div>
+        <div class="card">
+          <h2>✉️ 本文</h2>
+          <div style="white-space:pre-wrap; font-size:13px; max-height:400px; overflow-y:auto;">${esc(m.body || "(本文なし)")}</div>
+        </div>
+        ${m.reply_text ? `<div class="card">
+          <h2>✅ 送信した返信</h2>
+          <div style="white-space:pre-wrap; font-size:13px; color:var(--text-secondary);">${esc(m.reply_text)}</div>
+        </div>` : ""}
+      </div>
+      <div style="display:flex; flex-direction:column; gap:16px;">
+        <div class="card">
+          <h2>📝 返信ドラフト <span id="draft-src"></span></h2>
+          <textarea class="input" id="draft-text" rows="14" placeholder="「AIでドラフト作成」を押すか、直接入力してください">${esc(m.draft || "")}</textarea>
+          <label class="form-label" style="margin-top:8px;">AIへの指示(任意)
+            <input class="input" id="draft-instructions" placeholder="例: 訪問日程を2案提示して">
+          </label>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="btn" id="draft-gen">🤖 AIでドラフト作成</button>
+            <button class="btn btn-primary" id="reply-send" ${m.status === "replied" ? "disabled" : ""}>📤 この内容で返信を送信</button>
+          </div>
+          <div class="muted" style="margin-top:8px;">送信前に必ず内容を確認してください(AIは自動送信しません)。</div>
+        </div>
+        <div class="card">
+          <h2>⚡ 対応</h2>
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            ${m.status !== "replied" ? `<button class="btn" id="mark-replied">✅ 対応済みにする(メール外で対応した)</button>` : ""}
+            ${m.status !== "dismissed" ? `<button class="btn" id="mark-dismissed">🚫 対応不要にする</button>` : ""}
+            ${m.status !== "open" ? `<button class="btn" id="mark-open">↩ 未対応に戻す</button>` : ""}
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.getElementById("draft-gen").addEventListener("click", async () => {
+    const btn = document.getElementById("draft-gen");
+    btn.disabled = true;
+    btn.textContent = "生成中…";
+    try {
+      const r = await Api.post(`/api/mail/${m.id}/draft`, { instructions: document.getElementById("draft-instructions").value });
+      document.getElementById("draft-text").value = r.draft;
+      document.getElementById("draft-src").innerHTML = aiBadge(r.source, r.model);
+    } catch (err) {
+      toast(err.message, true);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "🤖 AIでドラフト作成";
+    }
+  });
+
+  document.getElementById("reply-send").addEventListener("click", async () => {
+    const text = document.getElementById("draft-text").value.trim();
+    if (!text) { toast("返信内容が空です", true); return; }
+    if (!confirm(`${m.from_address} 宛に返信を送信します。よろしいですか?`)) return;
+    const btn = document.getElementById("reply-send");
+    btn.disabled = true;
+    try {
+      await Api.post(`/api/mail/${m.id}/reply`, { text });
+      toast("返信を送信しました");
+      renderMailDetail(id);
+    } catch (err) {
+      toast(err.message, true);
+      btn.disabled = false;
+    }
+  });
+
+  for (const [btnId, status] of [["mark-replied", "replied"], ["mark-dismissed", "dismissed"], ["mark-open", "open"]]) {
+    document.getElementById(btnId)?.addEventListener("click", async () => {
+      await Api.patch(`/api/mail/${m.id}`, { status });
+      renderMailDetail(id);
+    });
+  }
+}
+
+/* ============================================================
    売上分析
 ============================================================ */
 async function renderAnalytics() {
@@ -954,7 +1162,9 @@ async function renderAssistant() {
    設定
 ============================================================ */
 async function renderSettings() {
-  const [{ settings, ai }, { engineers }] = await Promise.all([Api.get("/api/settings"), Api.get("/api/engineers")]);
+  const [{ settings, ai }, { engineers }, mailData] = await Promise.all([
+    Api.get("/api/settings"), Api.get("/api/engineers"), Api.get("/api/mail?filter=all"),
+  ]);
   const on = (k) => settings[k] === "1";
 
   $main.innerHTML = `
@@ -991,6 +1201,40 @@ async function renderSettings() {
         <label class="form-label">振込先<input class="input" data-setting-text="bankInfo" value="${esc(settings.bankInfo)}"></label>
         <button class="btn btn-primary btn-sm" id="company-save">自社情報を保存</button>
       </div>
+    </div>
+
+    <div class="card" style="margin-top:16px;">
+      <h2>📧 メールアカウント(受信監視・AI振り分け) <button class="btn btn-sm more" id="mail-acc-add">+ 追加</button></h2>
+      ${mailData.accounts.length ? mailData.accounts.map((a) => `
+        <div class="setting-row">
+          <div style="flex:1;">
+            <div class="s-name">${esc(a.label)} <span class="muted">(${esc(a.username)} / ${esc(a.provider)})</span>
+              ${!a.active ? `<span class="badge badge-neutral">停止中</span>` : a.last_error ? `<span class="badge badge-critical">エラー</span>` : `<span class="badge badge-good">監視中</span>`}
+            </div>
+            <div class="s-desc">${a.last_error ? esc(a.last_error) : a.last_sync_at ? "最終受信: " + fmtDateTime(a.last_sync_at) : "まだ受信していません"}</div>
+          </div>
+          <button class="btn btn-sm" data-acc-test="${a.id}">接続テスト</button>
+          <button class="btn btn-sm" data-acc-edit="${a.id}">編集</button>
+          <button class="btn btn-sm" data-acc-del="${a.id}">削除</button>
+        </div>`).join("") : `<div class="empty">未登録です。「+ 追加」からGmail / Outlookを登録すると、受信メールのAI振り分けと返信漏れ監視が始まります。</div>`}
+      <div class="grid grid-2" style="margin-top:12px;">
+        <div class="setting-row">
+          <div><div class="s-name">受信チェック間隔</div><div class="s-desc">新着メールを取り込む頻度</div></div>
+          <select class="input" data-setting="mailPollMinutes">
+            ${[5, 10, 30, 60].map((v) => `<option value="${v}" ${Number(settings.mailPollMinutes) === v ? "selected" : ""}>${v}分</option>`).join("")}
+          </select>
+        </div>
+        <div class="setting-row">
+          <div><div class="s-name">返信漏れアラート</div><div class="s-desc">要返信メールを危険案件に上げるまでの時間</div></div>
+          <select class="input" data-setting="mailReplyHours">
+            ${[4, 8, 24, 48, 72].map((v) => `<option value="${v}" ${Number(settings.mailReplyHours) === v ? "selected" : ""}>${v}時間</option>`).join("")}
+          </select>
+        </div>
+      </div>
+      <label class="form-label" style="margin-top:8px;">メール署名(AI返信ドラフトの末尾に使用)
+        <textarea class="input" id="mail-signature" rows="3" placeholder="例: 株式会社VTaBridge 山田太郎&#10;TEL: 03-xxxx-xxxx">${esc(settings.mailSignature || "")}</textarea>
+      </label>
+      <button class="btn btn-primary btn-sm" id="mail-signature-save">署名を保存</button>
     </div>
 
     <div class="grid grid-2" style="margin-top:16px;">
@@ -1038,6 +1282,64 @@ async function renderSettings() {
     document.querySelectorAll("[data-setting-text]").forEach((el) => { body[el.dataset.settingText] = el.value; });
     await Api.patch("/api/settings", body);
     toast("自社情報を保存しました");
+  });
+
+  /* メールアカウント */
+  const accountFields = (a = {}) => [
+    { key: "provider", label: "プロバイダ", type: "select", options: ["gmail", "outlook", "custom"], value: a.provider || "gmail" },
+    { key: "label", label: "表示名", value: a.label || "", },
+    { key: "username", label: "メールアドレス", required: !a.id, value: a.username || "", wide: true },
+    { key: "password", label: a.id ? "パスワード(変更する場合のみ入力)" : "アプリパスワード", type: "password", required: !a.id, wide: true },
+    { key: "imap_host", label: "IMAPサーバー(customのみ)", value: a.provider === "custom" ? a.imap_host : "" },
+    { key: "smtp_host", label: "SMTPサーバー(customのみ)", value: a.provider === "custom" ? a.smtp_host : "" },
+  ];
+  document.getElementById("mail-acc-add").addEventListener("click", async () => {
+    const v = await modalForm("メールアカウントを追加", accountFields(), "追加");
+    if (!v) return;
+    try {
+      await Api.post("/api/mail/accounts", v);
+      toast("アカウントを追加しました。「接続テスト」で確認してください");
+      renderSettings();
+    } catch (err) { toast(err.message, true); }
+  });
+  document.querySelectorAll("[data-acc-edit]").forEach((b) => {
+    b.addEventListener("click", async () => {
+      const a = mailData.accounts.find((x) => x.id === Number(b.dataset.accEdit));
+      const v = await modalForm("メールアカウントを編集", [
+        ...accountFields(a),
+        { key: "active", label: "状態", type: "select", options: ["監視する", "停止する"], value: a.active ? "監視する" : "停止する" },
+      ]);
+      if (!v) return;
+      try {
+        await Api.patch(`/api/mail/accounts/${a.id}`, { ...v, active: v.active === "監視する" });
+        toast("アカウントを更新しました");
+        renderSettings();
+      } catch (err) { toast(err.message, true); }
+    });
+  });
+  document.querySelectorAll("[data-acc-test]").forEach((b) => {
+    b.addEventListener("click", async () => {
+      b.disabled = true;
+      b.textContent = "テスト中…";
+      try {
+        const r = await Api.post("/api/mail/accounts/test", { id: Number(b.dataset.accTest) });
+        if (r.imap && r.smtp) toast("接続OK!受信・送信ともに利用できます");
+        else toast(r.error || "接続に失敗しました", true);
+      } catch (err) { toast(err.message, true); }
+      finally { b.disabled = false; b.textContent = "接続テスト"; }
+    });
+  });
+  document.querySelectorAll("[data-acc-del]").forEach((b) => {
+    b.addEventListener("click", async () => {
+      if (!confirm("このアカウントと取り込んだメールを削除します。よろしいですか?")) return;
+      await Api.del(`/api/mail/accounts/${b.dataset.accDel}`);
+      toast("削除しました");
+      renderSettings();
+    });
+  });
+  document.getElementById("mail-signature-save").addEventListener("click", async () => {
+    await Api.patch("/api/settings", { mailSignature: document.getElementById("mail-signature").value });
+    toast("署名を保存しました");
   });
 
   document.getElementById("eng-add").addEventListener("click", async () => {
