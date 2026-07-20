@@ -22,8 +22,10 @@ npm test           # スモークテスト(サーバー起動 + ヘルスチェ�
 ```
 server/          Express バックエンド
   server.js      エントリポイント(app 生成は createApp() でエクスポート)
-  smoke-test.js  スモークテスト
-public/          フロントエンド(静的配信)
+  db.js          SQLiteスキーマ(users / sessions)
+  auth.js        セッション認証・管理者アカウント管理
+  smoke-test.js  スモークテスト(一時 DATA_DIR で認証フローを検証)
+public/          フロントエンド(Vanilla JS SPA)
 docs/            設計・分析ドキュメント
 ```
 
@@ -38,8 +40,8 @@ docs/            設計・分析ドキュメント
 
 全体設計は `docs/design.md`、各フェーズの詳細設計は `docs/phase-N-design.md` を参照。
 
-- **Phase 0** ✅ 基盤: リポジトリ整備・最小サーバー・ヘルスチェック・スモークテスト(本フェーズ)
-- **Phase 1** DB スキーマ + セッション認証 + ログイン画面(設計済: `docs/phase-1-design.md`)
+- **Phase 0** ✅ 基盤: リポジトリ整備・最小サーバー・ヘルスチェック・スモークテスト
+- **Phase 1** ✅ DB スキーマ + セッション認証 + ログイン画面(設計: `docs/phase-1-design.md`)
 - **Phase 2** 案件・商談 CRUD とホーム画面(今日やること最大3件)
 - **Phase 3** KPI・危険検知・売上分析(実データ計算)
 - **Phase 4** AI連携(AI秘書・議事録TODO抽出、フォールバック付き)
