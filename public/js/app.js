@@ -75,6 +75,8 @@ function layout(title, content) {
         navLink('#/projects', '案件'),
         navLink('#/deals', '商談'),
         navLink('#/analytics', '売上分析'),
+        navLink('#/minutes', 'AI議事録'),
+        navLink('#/assistant', 'AI秘書'),
         navLink('#/settings', '設定'),
       ]),
       el('div', { className: 'user' }, [
@@ -556,6 +558,136 @@ async function renderDealDetail(id) {
   ]));
 }
 
+/* ===== AI共通 ===== */
+
+function sourceBadge(source, model) {
+  return el('span', {
+    className: 'badge ai-badge',
+    textContent: source === 'ai' ? `🤖 AI(${model || 'Claude'})` : '📋 ルールベース',
+  });
+}
+
+/* ===== AI議事録取込 ===== */
+
+async function renderMinutes() {
+  const { projects } = await api('/api/projects');
+
+  const input = el('textarea', { rows: 10, placeholder: '会議の議事録を貼り付けてください。\n例:\n・要件定義書を7/25までに送付する\n・見積書を作成する(来週)' });
+  const extractBtn = el('button', { type: 'button', textContent: 'TODOを抽出' });
+  const error = el('p', { className: 'error' });
+  const resultArea = el('div');
+
+  extractBtn.addEventListener('click', async () => {
+    error.textContent = '';
+    resultArea.replaceChildren(el('p', { className: 'muted', textContent: '抽出中…' }));
+    extractBtn.disabled = true;
+    try {
+      const result = await api('/api/ai/extract', { body: { text: input.value } });
+      renderExtractResult(result);
+    } catch (err) {
+      error.textContent = err.message;
+      resultArea.replaceChildren();
+    } finally {
+      extractBtn.disabled = false;
+    }
+  });
+
+  function renderExtractResult(result) {
+    if (!result.todos.length) {
+      resultArea.replaceChildren(el('p', { className: 'muted', textContent: 'TODOが見つかりませんでした。' }));
+      return;
+    }
+    const checks = result.todos.map((t) => {
+      const box = el('input', { type: 'checkbox', checked: true });
+      return { box, todo: t, row: el('li', {}, [box,
+        el('span', { textContent: t.title }),
+        el('span', { className: 'muted', textContent: t.due ? `期限 ${t.due}` : '期限なし' })]) };
+    });
+    const projSel = el('select', {}, projects.map((p) =>
+      el('option', { value: p.id, textContent: `${p.name}(${p.client})` })));
+    const registerBtn = el('button', { type: 'button', textContent: '選択したTODOを案件に登録' });
+    const msg = el('p', { className: 'muted' });
+    registerBtn.addEventListener('click', async () => {
+      const selected = checks.filter((c) => c.box.checked).map((c) => c.todo);
+      if (!selected.length || !projSel.value) return;
+      registerBtn.disabled = true;
+      try {
+        await api(`/api/projects/${projSel.value}/tasks`, { body: { tasks: selected, source: 'minutes' } });
+        msg.replaceChildren(`${selected.length}件を登録しました → `,
+          el('a', { href: `#/projects/${projSel.value}`, textContent: '案件を開く' }));
+      } catch (err) { msg.textContent = err.message; msg.className = 'error'; }
+      registerBtn.disabled = false;
+    });
+    resultArea.replaceChildren(
+      el('div', { className: 'row' }, [sourceBadge(result.source, result.model),
+        result.note ? el('span', { className: 'muted', textContent: result.note }) : '']),
+      el('ul', { className: 'tasks' }, checks.map((c) => c.row)),
+      projects.length
+        ? el('div', { className: 'row' }, [projSel, registerBtn, msg])
+        : el('p', { className: 'muted', textContent: '登録先の案件がありません。先に案件を作成してください。' }),
+    );
+  }
+
+  layout('AI議事録取込', el('div', {}, [
+    section('議事録からTODOを抽出', el('div', { style: 'display:grid; gap:0.8rem' }, [input, el('div', { className: 'row' }, [extractBtn, error])])),
+    section('抽出結果', resultArea),
+  ]));
+}
+
+/* ===== AI秘書 ===== */
+
+const chatHistory = [];
+
+async function renderAssistant() {
+  const d = await api('/api/dashboard');
+
+  const log = el('div', { className: 'chat-log' });
+  const renderMsg = (role, text, source, model) => {
+    const bubble = el('div', { className: `chat-msg ${role}` }, [
+      role === 'assistant' && source ? sourceBadge(source, model) : '',
+      el('p', { textContent: text }),
+    ]);
+    log.append(bubble);
+    log.scrollTop = log.scrollHeight;
+  };
+  for (const m of chatHistory) renderMsg(m.role, m.content, m.source, m.model);
+  if (!chatHistory.length) {
+    log.append(el('p', { className: 'muted', textContent: '「今日やることは?」「危険案件は?」「今月の売上は?」など、経営データに基づいて回答します。' }));
+  }
+
+  const q = el('input', { placeholder: '質問を入力…', required: true });
+  const send = el('button', { type: 'submit', textContent: '送信' });
+  const form = el('form', { className: 'row' }, [q, send]);
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const question = q.value.trim();
+    if (!question) return;
+    q.value = '';
+    send.disabled = true;
+    renderMsg('user', question);
+    chatHistory.push({ role: 'user', content: question });
+    const thinking = el('p', { className: 'muted', textContent: '考え中…' });
+    log.append(thinking);
+    try {
+      const res = await api('/api/ai/chat', { body: { question, history: chatHistory.map(({ role, content }) => ({ role, content })) } });
+      thinking.remove();
+      renderMsg('assistant', res.reply, res.source, res.model);
+      chatHistory.push({ role: 'assistant', content: res.reply, source: res.source, model: res.model });
+    } catch (err) {
+      thinking.remove();
+      renderMsg('assistant', `エラー: ${err.message}`);
+    }
+    send.disabled = false;
+    q.focus();
+  });
+
+  layout('AI秘書', el('div', {}, [
+    section(d.ai.enabled ? `Claude API 連携中(${d.ai.model})` : 'APIキー未設定(ルールベースで動作中)',
+      el('div', { style: 'display:grid; gap:0.8rem' }, [log, form])),
+  ]));
+  q.focus();
+}
+
 /* ===== ルーター ===== */
 
 async function route() {
@@ -577,6 +709,8 @@ async function route() {
     else if (hash === '#/deals') await renderDeals();
     else if ((m = /^#\/deals\/(\d+)$/.exec(hash))) await renderDealDetail(m[1]);
     else if (hash === '#/analytics') await renderAnalytics();
+    else if (hash === '#/minutes') await renderMinutes();
+    else if (hash === '#/assistant') await renderAssistant();
     else if (hash === '#/settings') await renderSettings();
     else await renderHome();
   } catch (err) {

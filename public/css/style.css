@@ -154,3 +154,14 @@ th { color: #94a3b8; font-weight: 500; }
 .lg-line { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
 .tabs { display: flex; gap: 0.4rem; }
 .tabs button.on { background: #38bdf8; }
+
+/* ===== AI ===== */
+.ai-badge { background: #1d4ed8; align-self: start; }
+textarea { font: inherit; padding: 0.6rem 0.8rem; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: #e2e8f0; resize: vertical; }
+textarea:focus { outline: 2px solid #38bdf8; border-color: transparent; }
+
+.chat-log { display: grid; gap: 0.7rem; max-height: 26rem; overflow-y: auto; padding: 0.2rem; }
+.chat-msg { display: grid; gap: 0.3rem; padding: 0.7rem 0.9rem; border-radius: 10px; max-width: 85%; }
+.chat-msg p { margin: 0; white-space: pre-wrap; }
+.chat-msg.user { background: #0c4a6e; justify-self: end; }
+.chat-msg.assistant { background: #0f172a; justify-self: start; }

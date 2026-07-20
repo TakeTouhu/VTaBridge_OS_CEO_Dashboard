@@ -234,4 +234,23 @@ function suggestions() {
   return out.slice(0, 4);
 }
 
-module.exports = { kpis, monthlySales, pipeline, detectRisks, todayTasks, suggestions };
+/* ===== AI秘書のグラウンディング用・経営コンテキスト ===== */
+function businessContext() {
+  const k = kpis();
+  const risks = detectRisks();
+  const tasks = todayTasks();
+  const pipe = pipeline();
+  const eng = db.prepare('SELECT name, current_project, load FROM engineers WHERE active = 1').all();
+  const man = (v) => Math.round(v / 10000) + '万円';
+  return [
+    `本日: ${today()}`,
+    `今月KPI: 受注${man(k.orderAmount)} / 請求${man(k.invoicedAmount)} / 入金${man(k.paidAmount)} / 期日超過未回収${man(k.unpaidAmount)}(${k.unpaidCount}件)`,
+    `商談: 進行中${k.dealCount}件(見積提出${k.quoteCount}・契約待ち${k.awaitingContract}) / 開発中案件${k.inDevelopment}件 / 稼働エンジニア${k.activeEngineers}名`,
+    `パイプライン: ` + pipe.map((p) => `${p.stage}${p.count}件${p.amount}万円`).join(' / '),
+    `今日の優先タスク: ` + (tasks.map((t) => `${t.title}(${t.why})`).join(' / ') || 'なし'),
+    `危険案件: ` + (risks.map((r) => `[${r.type}] ${r.text}`).join(' / ') || 'なし'),
+    `エンジニア稼働: ` + eng.map((e) => `${e.name}${e.load}%${e.current_project ? `(${e.current_project})` : ''}`).join(' / '),
+  ].join('\n');
+}
+
+module.exports = { kpis, monthlySales, pipeline, detectRisks, todayTasks, suggestions, businessContext };

@@ -2,6 +2,7 @@
 
 const { db, getSettings, setSetting } = require('./db');
 const metrics = require('./metrics');
+const ai = require('./ai');
 const { requireAuth } = require('./auth');
 
 /* ===== バリデーションヘルパ ===== */
@@ -64,7 +65,20 @@ function registerApiRoutes(app) {
       pipeline: metrics.pipeline(),
       engineers: db.prepare('SELECT * FROM engineers WHERE active = 1 ORDER BY load DESC').all(),
       suggestions: metrics.suggestions(),
+      ai: ai.aiStatus(),
     });
+  });
+
+  /* ===== AI(議事録TODO抽出・AI秘書) ===== */
+  app.post('/api/ai/extract', async (req, res) => {
+    const text = str(req.body?.text, { max: 20000, required: true });
+    res.json(await ai.extractTodos(text));
+  });
+
+  app.post('/api/ai/chat', async (req, res) => {
+    const question = str(req.body?.question, { max: 2000, required: true });
+    const history = Array.isArray(req.body?.history) ? req.body.history : [];
+    res.json(await ai.chat(question, history));
   });
 
   app.get('/api/analytics', (req, res) => {

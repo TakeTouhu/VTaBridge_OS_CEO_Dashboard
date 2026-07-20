@@ -7,6 +7,7 @@ const path = require('node:path');
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'vtabridge-test-'));
 process.env.ADMIN_EMAIL = 'test@example.com';
 process.env.ADMIN_PASSWORD = 'test-password-123';
+delete process.env.ANTHROPIC_API_KEY; // AI機能はフォールバック経路で検証(外部サービス非依存)
 
 const assert = require('node:assert');
 const { createApp } = require('./server');
@@ -160,7 +161,36 @@ async function main() {
     const ana = await (await authed('/api/analytics?months=3')).json();
     assert.strictEqual(ana.monthlySales.length, 3, 'analytics should honor months param');
 
-    /* 17. ログアウト後の me は 401 */
+    /* 17. AI議事録TODO抽出(ルールベースフォールバック) */
+    const minutes = '【定例会議】\n・要件定義書を7/25までに送付する\n・デザイン案は決定済み\n・見積書を作成する(来週)';
+    const extract = await authed('/api/ai/extract', { body: { text: minutes } });
+    assert.strictEqual(extract.status, 200, 'POST /api/ai/extract should return 200');
+    const extractBody = await extract.json();
+    assert.strictEqual(extractBody.source, 'rules', 'without API key extraction should fall back to rules');
+    const titles = extractBody.todos.map((t) => t.title);
+    assert.ok(titles.some((t) => t.includes('要件定義書')), 'action item should be extracted');
+    assert.ok(!titles.some((t) => t.includes('決定済み')), 'non-action line should be excluded');
+    const withDue = extractBody.todos.find((t) => t.title.includes('要件定義書'));
+    assert.match(withDue.due, /^\d{4}-07-25$/, 'relative due date should be normalized to YYYY-MM-DD');
+
+    /* 18. 抽出結果を案件へ一括登録(source=minutes) */
+    const bulk = await authed(`/api/projects/${projectId}/tasks`, { body: { tasks: extractBody.todos, source: 'minutes' } });
+    assert.strictEqual(bulk.status, 201, 'bulk task registration should return 201');
+    const afterBulk = await (await authed(`/api/projects/${projectId}`)).json();
+    assert.ok(afterBulk.project.events.some((ev) => ev.text.includes('AI議事録')), 'minutes registration should be recorded in timeline');
+
+    /* 19. AI秘書チャット(ルールベースフォールバック・経営データに基づく回答) */
+    const chatRes = await authed('/api/ai/chat', { body: { question: '今日やることは?' } });
+    assert.strictEqual(chatRes.status, 200, 'POST /api/ai/chat should return 200');
+    const chatBody = await chatRes.json();
+    assert.strictEqual(chatBody.source, 'rules', 'without API key chat should fall back to rules');
+    assert.ok(chatBody.reply.includes('今日の優先タスク'), 'chat should answer from business context');
+
+    /* 20. ダッシュボードの AI 状態 */
+    const dashAi = await (await authed('/api/dashboard')).json();
+    assert.strictEqual(dashAi.ai.enabled, false, 'dashboard should report AI disabled without key');
+
+    /* 21. ログアウト後の me は 401 */
     const logout = await fetch(`${base}/api/auth/logout`, {
       method: 'POST',
       headers: { cookie: `sid=${sid}` },
@@ -169,7 +199,7 @@ async function main() {
     const afterLogout = await fetch(`${base}/api/auth/me`, { headers: { cookie: `sid=${sid}` } });
     assert.strictEqual(afterLogout.status, 401, 'me after logout should return 401');
 
-    /* 18. 静的配信 */
+    /* 22. 静的配信 */
     const index = await fetch(`${base}/`);
     assert.strictEqual(index.status, 200, 'GET / should serve the SPA page');
     const html = await index.text();

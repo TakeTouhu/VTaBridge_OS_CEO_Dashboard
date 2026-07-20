@@ -1,6 +1,6 @@
 {
   "name": "vtabridge-os-ceo-dashboard",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "社長が毎朝5分で会社の状況と最優先タスクを把握し、AIによる意思決定支援を受けられるダッシュボード",
   "main": "server/server.js",
   "scripts": {
@@ -13,6 +13,7 @@
     "node": ">=22"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.112.4",
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^12.11.1",
     "express": "^5.2.1"

@@ -2,7 +2,7 @@
 
 社長が**毎朝5分**で会社の状況と最優先タスクを把握し、AIによる意思決定支援を受けられるダッシュボード。
 
-現在は **Phase 3(KPI・危険検知・売上分析)** まで実装済みです。ホームで今日やること(最大3件)・危険案件・KPI・売上推移・パイプライン・エンジニア稼働・AI営業アドバイスが実データから一望でき、売上分析・設定画面も動作します。設計は [docs/design.md](docs/design.md)、ロードマップと規約は [CLAUDE.md](CLAUDE.md) を参照してください。
+現在は **Phase 4(AI連携)** まで実装済みです。ホームで今日やること(最大3件)・危険案件・KPI・売上推移・パイプライン・エンジニア稼働・AI営業アドバイスが実データから一望でき、AI議事録取込(TODO抽出→案件へワンクリック登録)と AI秘書(経営データにグラウンディングしたチャット)が動作します。**`ANTHROPIC_API_KEY` 未設定でも全機能が動作**し、AI機能はルールベースにフォールバックします(UIにバッジ表示)。設計は [docs/design.md](docs/design.md)、ロードマップと規約は [CLAUDE.md](CLAUDE.md) を参照してください。
 
 ## クイックスタート
 
@@ -26,11 +26,13 @@ npm test               # スモークテスト
 | GET | `/api/analytics?months=n` | 月次売上(受注/請求/入金) |
 | GET/POST | `/api/engineers`、PATCH `/api/engineers/:id` | エンジニア管理 |
 | GET/PATCH | `/api/settings` | 危険検知しきい値・自社情報 |
+| POST | `/api/ai/extract` | 議事録からTODO抽出(Claude API / ルールベース) |
+| POST | `/api/ai/chat` | AI秘書チャット(経営データにグラウンディング) |
 | GET/POST | `/api/projects`、GET/PATCH `/api/projects/:id` | 案件 CRUD |
 | POST | `/api/projects/:id/tasks`、PATCH/DELETE `/api/tasks/:id` | タスク管理 |
 | GET/POST | `/api/deals`、GET/PATCH `/api/deals/:id` | 商談 CRUD(受注→案件自動作成) |
 | POST | `/api/deals/:id/activities` | 商談の活動記録 |
-| GET | `/` | SPA(ホーム / 案件 / 商談 / 売上分析 / 設定) |
+| GET | `/` | SPA(ホーム / 案件 / 商談 / 売上分析 / AI議事録 / AI秘書 / 設定) |
 
 `/api/health` と認証系以外のAPIはすべて認証必須です。
 
