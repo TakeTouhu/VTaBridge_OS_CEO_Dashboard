@@ -2,44 +2,63 @@
 
 body {
   font-family: system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
-  display: grid;
-  place-items: center;
-  min-height: 100vh;
   margin: 0;
+  min-height: 100vh;
   background: #0f172a;
   color: #e2e8f0;
 }
 
+.center { display: grid; place-items: center; min-height: 100vh; }
+
+/* ===== ヘッダー ===== */
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.7rem 1.2rem;
+  background: #1e293b;
+  border-bottom: 1px solid #334155;
+}
+nav { display: flex; align-items: center; gap: 1.1rem; }
+nav strong { color: #38bdf8; }
+nav a { color: #94a3b8; text-decoration: none; padding: 0.3rem 0; }
+nav a.active, nav a:hover { color: #e2e8f0; border-bottom: 2px solid #38bdf8; }
+.user { display: flex; align-items: center; gap: 0.8rem; }
+
+main { max-width: 60rem; margin: 0 auto; padding: 1.2rem; display: grid; gap: 1rem; }
+main h1 { font-size: 1.25rem; margin: 0; }
+main a { color: #38bdf8; }
+
+/* ===== カード ===== */
 .card {
   background: #1e293b;
   border-radius: 12px;
-  padding: 2rem;
-  width: min(92vw, 24rem);
+  padding: 1.2rem 1.4rem;
   display: grid;
   gap: 0.9rem;
 }
-
-h1 { font-size: 1.25rem; margin: 0; }
+.card h2 { font-size: 1rem; margin: 0; color: #94a3b8; }
+.login-card { width: min(92vw, 24rem); padding: 2rem; }
+.login-card h1 { font-size: 1.25rem; margin: 0; }
 
 .muted { color: #94a3b8; margin: 0; }
-
 .error { color: #f87171; min-height: 1.2em; margin: 0; }
 
+/* ===== フォーム ===== */
 label { display: grid; gap: 0.3rem; font-size: 0.85rem; color: #94a3b8; }
-
-input {
+input, select, textarea {
   font: inherit;
-  padding: 0.55rem 0.7rem;
+  padding: 0.5rem 0.7rem;
   border-radius: 8px;
   border: 1px solid #334155;
   background: #0f172a;
   color: #e2e8f0;
 }
-input:focus { outline: 2px solid #38bdf8; border-color: transparent; }
+input:focus, select:focus, textarea:focus { outline: 2px solid #38bdf8; border-color: transparent; }
 
 button {
   font: inherit;
-  padding: 0.6rem;
+  padding: 0.55rem 1rem;
   border: none;
   border-radius: 8px;
   background: #0ea5e9;
@@ -50,3 +69,42 @@ button:hover { background: #38bdf8; }
 button:disabled { opacity: 0.6; cursor: wait; }
 button.secondary { background: #334155; }
 button.secondary:hover { background: #475569; }
+button.small { padding: 0.25rem 0.6rem; font-size: 0.8rem; }
+
+.row { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; }
+.row input { flex: 1 1 8rem; }
+.grid-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: 0.8rem; align-items: end; }
+.grid-form button { justify-self: start; }
+
+/* ===== テーブル ===== */
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+th, td { text-align: left; padding: 0.5rem 0.7rem; border-bottom: 1px solid #334155; white-space: nowrap; }
+th { color: #94a3b8; font-weight: 500; }
+
+.badge { padding: 0.15rem 0.55rem; border-radius: 999px; font-size: 0.78rem; background: #334155; }
+.badge.s-開発中 { background: #075985; }
+.badge.s-契約待ち { background: #92400e; }
+.badge.s-保守 { background: #065f46; }
+.badge.s-完了 { background: #334155; }
+.badge.s-受注 { background: #065f46; }
+.badge.s-失注 { background: #7f1d1d; }
+.badge.s-見積提出 { background: #075985; }
+.badge.s-商談中 { background: #1d4ed8; }
+.badge.s-リード { background: #334155; }
+
+/* ===== ホーム ===== */
+.today { margin: 0; padding-left: 1.4rem; display: grid; gap: 0.7rem; }
+.today a { font-weight: 600; }
+
+.pipeline { display: grid; grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr)); gap: 0.6rem; }
+.stage { display: grid; gap: 0.15rem; background: #0f172a; border-radius: 8px; padding: 0.6rem 0.8rem; text-align: center; }
+
+/* ===== タスク・タイムライン ===== */
+.tasks { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.4rem; }
+.tasks li { display: flex; align-items: center; gap: 0.6rem; }
+.tasks li.done span { text-decoration: line-through; color: #64748b; }
+.tasks li button { margin-left: auto; }
+
+.timeline { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.4rem; font-size: 0.9rem; }
+.timeline li { display: flex; gap: 0.8rem; }

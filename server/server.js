@@ -5,6 +5,7 @@ const express = require('express');
 
 const pkg = require('../package.json');
 const { ensureAdmin, sessionMiddleware, registerAuthRoutes, cleanupSessions } = require('./auth');
+const { registerApiRoutes } = require('./api');
 
 function createApp() {
   const app = express();
@@ -34,6 +35,7 @@ function createApp() {
   });
 
   registerAuthRoutes(app);
+  registerApiRoutes(app);
 
   app.use(express.static(path.join(__dirname, '..', 'public')));
 

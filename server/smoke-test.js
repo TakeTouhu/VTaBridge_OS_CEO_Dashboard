@@ -56,7 +56,72 @@ async function main() {
     const meBody = await me.json();
     assert.strictEqual(meBody.user.email, 'test@example.com', 'me should return the logged-in user');
 
-    /* 6. ログアウト後の me は 401 */
+    const authed = (path, options = {}) => fetch(`${base}${path}`, {
+      method: options.method || (options.body ? 'POST' : 'GET'),
+      headers: { cookie: `sid=${sid}`, ...(options.body ? { 'Content-Type': 'application/json' } : {}) },
+      body: options.body ? JSON.stringify(options.body) : undefined,
+    });
+
+    /* 6. 認証ガード: 未ログインの業務APIは 401 */
+    const guard = await fetch(`${base}/api/projects`);
+    assert.strictEqual(guard.status, 401, 'GET /api/projects without session should return 401');
+
+    /* 7. 案件 CRUD */
+    const created = await authed('/api/projects', { body: { name: 'テスト案件', client: 'テスト商事', amount: 3000000, deadline: '2026-12-31' } });
+    assert.strictEqual(created.status, 201, 'POST /api/projects should return 201');
+    const projectId = (await created.json()).project.id;
+
+    const list = await authed('/api/projects');
+    assert.strictEqual((await list.json()).projects.length, 1, 'project list should contain the created project');
+
+    const patched = await authed(`/api/projects/${projectId}`, { method: 'PATCH', body: { status: '開発中', progress: 30 } });
+    assert.strictEqual(patched.status, 200, 'PATCH /api/projects/:id should return 200');
+    const patchedBody = await patched.json();
+    assert.strictEqual(patchedBody.project.status, '開発中', 'project status should be updated');
+    assert.ok(patchedBody.project.events.some((ev) => ev.text.includes('開発中')), 'status change should be recorded in timeline');
+
+    /* 8. タスクと今日やること(最大3件・理由付き) */
+    const overdue = new Date(Date.now() - 2 * 86400000).toISOString().slice(0, 10);
+    for (let i = 1; i <= 4; i++) {
+      const t = await authed(`/api/projects/${projectId}/tasks`, { body: { title: `タスク${i}`, due: i === 1 ? overdue : '' } });
+      assert.strictEqual(t.status, 201, 'POST tasks should return 201');
+    }
+    const dash = await authed('/api/dashboard');
+    assert.strictEqual(dash.status, 200, 'GET /api/dashboard should return 200');
+    const dashBody = await dash.json();
+    assert.ok(dashBody.todayTasks.length <= 3, 'todayTasks must be capped at 3');
+    assert.strictEqual(dashBody.todayTasks[0].title, 'タスク1', 'overdue task should rank first');
+    assert.ok(dashBody.todayTasks[0].why.includes('超過'), 'todayTasks should explain why');
+
+    /* 9. タスク完了切替 */
+    const projDetail = await (await authed(`/api/projects/${projectId}`)).json();
+    const firstTask = projDetail.project.tasks[0];
+    const done = await authed(`/api/tasks/${firstTask.id}`, { method: 'PATCH', body: { done: true } });
+    assert.strictEqual(done.status, 200, 'PATCH /api/tasks/:id should return 200');
+
+    /* 10. 商談 → 受注で案件を自動作成 */
+    const dealRes = await authed('/api/deals', { body: { client: '新規顧客', title: '新システム開発', amount: 5000000 } });
+    assert.strictEqual(dealRes.status, 201, 'POST /api/deals should return 201');
+    const dealId = (await dealRes.json()).deal.id;
+
+    const won = await authed(`/api/deals/${dealId}`, { method: 'PATCH', body: { stage: '受注' } });
+    assert.strictEqual(won.status, 200, 'PATCH deal to 受注 should return 200');
+    const wonBody = await won.json();
+    assert.ok(wonBody.createdProjectId, '受注 should auto-create a project');
+    const autoProject = await authed(`/api/projects/${wonBody.createdProjectId}`);
+    assert.strictEqual(autoProject.status, 200, 'auto-created project should exist');
+    const autoBody = await autoProject.json();
+    assert.strictEqual(autoBody.project.name, '新システム開発', 'auto-created project should inherit deal title');
+    assert.strictEqual(autoBody.project.status, '契約待ち', 'auto-created project should start as 契約待ち');
+
+    /* 11. 商談活動記録とパイプライン */
+    const act = await authed(`/api/deals/${dealId}/activities`, { body: { text: '契約書を送付' } });
+    assert.strictEqual(act.status, 201, 'POST deal activity should return 201');
+    const dealsList = await (await authed('/api/deals')).json();
+    const wonStage = dealsList.pipeline.find((s) => s.stage === '受注');
+    assert.strictEqual(wonStage.count, 1, 'pipeline should count the won deal');
+
+    /* 12. ログアウト後の me は 401 */
     const logout = await fetch(`${base}/api/auth/logout`, {
       method: 'POST',
       headers: { cookie: `sid=${sid}` },
@@ -65,7 +130,7 @@ async function main() {
     const afterLogout = await fetch(`${base}/api/auth/me`, { headers: { cookie: `sid=${sid}` } });
     assert.strictEqual(afterLogout.status, 401, 'me after logout should return 401');
 
-    /* 7. 静的配信 */
+    /* 13. 静的配信 */
     const index = await fetch(`${base}/`);
     assert.strictEqual(index.status, 200, 'GET / should serve the SPA page');
     const html = await index.text();
