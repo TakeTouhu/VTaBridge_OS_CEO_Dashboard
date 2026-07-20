@@ -1,0 +1,18 @@
+{
+  "name": "vtabridge-os-ceo-dashboard",
+  "version": "0.0.1",
+  "description": "社長が毎朝5分で会社の状況と最優先タスクを把握し、AIによる意思決定支援を受けられるダッシュボード",
+  "main": "server/server.js",
+  "scripts": {
+    "start": "node server/server.js",
+    "test": "node server/smoke-test.js"
+  },
+  "license": "MIT",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "express": "^5.2.1"
+  }
+}
