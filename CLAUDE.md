@@ -24,8 +24,8 @@ server/          Express バックエンド
   server.js      エントリポイント(app 生成は createApp() でエクスポート)
   db.js          SQLiteスキーマ(users / sessions / projects / deals ほか)
   auth.js        セッション認証・管理者アカウント管理
-  api.js         REST API(案件・商談・ダッシュボード)
-  metrics.js     優先度スコアリング(今日やること最大3件)・パイプライン集計
+  api.js         REST API(案件・商談・ダッシュボード・エンジニア・設定)
+  metrics.js     KPI・危険検知・優先度スコアリング(今日やること最大3件)・売上集計
   smoke-test.js  スモークテスト(一時 DATA_DIR で認証・CRUDフローを検証)
 public/          フロントエンド(Vanilla JS SPA)
 docs/            設計・分析ドキュメント
@@ -45,7 +45,7 @@ docs/            設計・分析ドキュメント
 - **Phase 0** ✅ 基盤: リポジトリ整備・最小サーバー・ヘルスチェック・スモークテスト
 - **Phase 1** ✅ DB スキーマ + セッション認証 + ログイン画面(設計: `docs/phase-1-design.md`)
 - **Phase 2** ✅ 案件・商談 CRUD とホーム画面(今日やること最大3件)(設計: `docs/phase-2-design.md`)
-- **Phase 3** KPI・危険検知・売上分析(実データ計算)
+- **Phase 3** ✅ KPI・危険検知・売上分析(実データ計算)(設計: `docs/phase-3-design.md`)
 - **Phase 4** AI連携(AI秘書・議事録TODO抽出、フォールバック付き)
 - **Phase 5** 書類作成・請求/入金・メール監視(AI Mail Manager)
 

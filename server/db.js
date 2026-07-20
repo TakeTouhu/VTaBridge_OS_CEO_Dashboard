@@ -89,6 +89,63 @@ CREATE TABLE IF NOT EXISTS deal_activities (
 );
 
 CREATE INDEX IF NOT EXISTS idx_tasks_project ON project_tasks(project_id, done);
+
+CREATE TABLE IF NOT EXISTS engineers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  current_project TEXT DEFAULT '',
+  load INTEGER NOT NULL DEFAULT 0 CHECK (load BETWEEN 0 AND 100),
+  active INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS invoices (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  number TEXT NOT NULL UNIQUE,
+  amount INTEGER NOT NULL,
+  issued_at TEXT DEFAULT NULL,   -- NULL = 未発行(未請求)ドラフト
+  due_date TEXT DEFAULT NULL,
+  paid_at TEXT DEFAULT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_invoices_project ON invoices(project_id);
 `);
 
-module.exports = { db };
+const DEFAULT_SETTINGS = {
+  notify: '1',
+  riskDetect: '1',
+  crmSync: '1',
+  autoInput: '1',
+  unpaidDays: '7',
+  noReplyDays: '3',
+  mailPollMinutes: '5',
+  mailReplyHours: '24',
+  mailSignature: '',
+  mailCategories: '見積依頼,契約相談,質問,クレーム,請求・支払い,開発相談,日程調整,広告・不要メール,雑談,その他',
+  followDays: '30',
+  quoteFollowDays: '5',
+  companyName: '株式会社VTaBridge',
+  companyAddress: '東京都○○区○○ 1-2-3',
+  bankInfo: '○○銀行 ○○支店 普通 1234567',
+};
+const insSetting = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
+for (const [k, v] of Object.entries(DEFAULT_SETTINGS)) insSetting.run(k, v);
+
+function getSettings() {
+  const out = {};
+  for (const r of db.prepare('SELECT key, value FROM settings').all()) out[r.key] = r.value;
+  return out;
+}
+
+function setSetting(key, value) {
+  if (!(key in DEFAULT_SETTINGS)) throw new Error('unknown setting: ' + key);
+  db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+    .run(key, String(value));
+}
+
+module.exports = { db, getSettings, setSetting };

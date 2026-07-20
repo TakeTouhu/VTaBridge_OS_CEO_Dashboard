@@ -1,6 +1,6 @@
 'use strict';
 
-const { db } = require('./db');
+const { db, getSettings, setSetting } = require('./db');
 const metrics = require('./metrics');
 const { requireAuth } = require('./auth');
 
@@ -54,15 +54,66 @@ function registerApiRoutes(app) {
     return requireAuth(req, res, next);
   });
 
-  /* ===== ダッシュボード(ホーム画面を1リクエストで構成) =====
-     kpi / risks は Phase 3 で実データ計算を実装する */
+  /* ===== ダッシュボード(ホーム画面を1リクエストで構成) ===== */
   app.get('/api/dashboard', (req, res) => {
     res.json({
+      kpi: metrics.kpis(),
       todayTasks: metrics.todayTasks(),
+      risks: metrics.detectRisks(),
+      monthlySales: metrics.monthlySales(6),
       pipeline: metrics.pipeline(),
-      risks: [],
-      kpi: null,
+      engineers: db.prepare('SELECT * FROM engineers WHERE active = 1 ORDER BY load DESC').all(),
+      suggestions: metrics.suggestions(),
     });
+  });
+
+  app.get('/api/analytics', (req, res) => {
+    const n = int(req.query.months, { min: 1, max: 24, fallback: 6 });
+    res.json({
+      kpi: metrics.kpis(),
+      monthlySales: metrics.monthlySales(n),
+    });
+  });
+
+  /* ===== エンジニア ===== */
+  app.get('/api/engineers', (req, res) => {
+    res.json({ engineers: db.prepare('SELECT * FROM engineers ORDER BY active DESC, load DESC').all() });
+  });
+
+  app.post('/api/engineers', (req, res) => {
+    const name = str(req.body?.name, { max: 100, required: true });
+    const info = db.prepare('INSERT INTO engineers (name, current_project, load) VALUES (?, ?, ?)')
+      .run(name, str(req.body?.current_project, { max: 200 }), int(req.body?.load, { max: 100 }));
+    res.status(201).json({ engineer: db.prepare('SELECT * FROM engineers WHERE id = ?').get(info.lastInsertRowid) });
+  });
+
+  app.patch('/api/engineers/:id', (req, res) => {
+    const e = db.prepare('SELECT * FROM engineers WHERE id = ?').get(req.params.id);
+    if (!e) throw httpError(404, 'エンジニアが見つかりません');
+    const b = req.body || {};
+    db.prepare('UPDATE engineers SET name = ?, current_project = ?, load = ?, active = ? WHERE id = ?').run(
+      b.name !== undefined ? str(b.name, { max: 100, required: true }) : e.name,
+      b.current_project !== undefined ? str(b.current_project, { max: 200 }) : e.current_project,
+      b.load !== undefined ? int(b.load, { max: 100 }) : e.load,
+      b.active !== undefined ? (b.active ? 1 : 0) : e.active,
+      e.id,
+    );
+    res.json({ engineer: db.prepare('SELECT * FROM engineers WHERE id = ?').get(e.id) });
+  });
+
+  /* ===== 設定 ===== */
+  app.get('/api/settings', (req, res) => {
+    res.json({ settings: getSettings() });
+  });
+
+  app.patch('/api/settings', (req, res) => {
+    const b = req.body || {};
+    try {
+      for (const [k, v] of Object.entries(b)) setSetting(k, str(String(v), { max: 1000 }));
+    } catch (e) {
+      throw httpError(400, '不明な設定キーです');
+    }
+    res.json({ settings: getSettings() });
   });
 
   /* ===== 案件 ===== */

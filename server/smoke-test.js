@@ -121,7 +121,46 @@ async function main() {
     const wonStage = dealsList.pipeline.find((s) => s.stage === '受注');
     assert.strictEqual(wonStage.count, 1, 'pipeline should count the won deal');
 
-    /* 12. ログアウト後の me は 401 */
+    /* 12. 設定: 既定値の取得・更新・未知キーの拒否 */
+    const settings = await (await authed('/api/settings')).json();
+    assert.strictEqual(settings.settings.unpaidDays, '7', 'settings should have defaults');
+    const setRes = await authed('/api/settings', { method: 'PATCH', body: { unpaidDays: '10' } });
+    assert.strictEqual(setRes.status, 200, 'PATCH /api/settings should return 200');
+    assert.strictEqual((await setRes.json()).settings.unpaidDays, '10', 'setting should be updated');
+    const badKey = await authed('/api/settings', { method: 'PATCH', body: { evil: 'x' } });
+    assert.strictEqual(badKey.status, 400, 'unknown setting key should return 400');
+
+    /* 13. エンジニア CRUD とダッシュボード反映 */
+    const engRes = await authed('/api/engineers', { body: { name: '山田', load: 95 } });
+    assert.strictEqual(engRes.status, 201, 'POST /api/engineers should return 201');
+    const engId = (await engRes.json()).engineer.id;
+    const engPatch = await authed(`/api/engineers/${engId}`, { method: 'PATCH', body: { load: 80 } });
+    assert.strictEqual((await engPatch.json()).engineer.load, 80, 'engineer load should be updated');
+
+    /* 14. KPI・危険検知・提案 */
+    const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    await authed(`/api/projects/${projectId}`, { method: 'PATCH', body: { deadline: yesterday, progress: 50 } });
+    const dash2 = await (await authed('/api/dashboard')).json();
+    assert.ok(dash2.kpi, 'dashboard should include kpi');
+    assert.strictEqual(dash2.kpi.orderAmount, 5000000, '受注済み商談が今月の受注額に計上される');
+    assert.strictEqual(dash2.kpi.inDevelopment, 1, '開発中案件数が KPI に反映される');
+    assert.ok(dash2.risks.some((r) => r.type === '納期遅延'), '期限超過の開発中案件が納期遅延として検知される');
+    assert.ok(Array.isArray(dash2.suggestions), 'dashboard should include suggestions');
+    assert.strictEqual(dash2.engineers[0].load, 80, 'dashboard should include active engineers');
+    assert.strictEqual(dash2.monthlySales.length, 6, 'dashboard should include 6 months of sales');
+    assert.strictEqual(dash2.monthlySales.at(-1).order, 500, '当月の受注が月次売上に計上される(万円)');
+
+    /* 15. 危険検知はしきい値・ON/OFF 設定に従う */
+    await authed('/api/settings', { method: 'PATCH', body: { riskDetect: '0' } });
+    const dashOff = await (await authed('/api/dashboard')).json();
+    assert.strictEqual(dashOff.risks.length, 0, 'riskDetect=0 で危険検知が止まる');
+    await authed('/api/settings', { method: 'PATCH', body: { riskDetect: '1' } });
+
+    /* 16. analytics の期間指定 */
+    const ana = await (await authed('/api/analytics?months=3')).json();
+    assert.strictEqual(ana.monthlySales.length, 3, 'analytics should honor months param');
+
+    /* 17. ログアウト後の me は 401 */
     const logout = await fetch(`${base}/api/auth/logout`, {
       method: 'POST',
       headers: { cookie: `sid=${sid}` },
@@ -130,7 +169,7 @@ async function main() {
     const afterLogout = await fetch(`${base}/api/auth/me`, { headers: { cookie: `sid=${sid}` } });
     assert.strictEqual(afterLogout.status, 401, 'me after logout should return 401');
 
-    /* 13. 静的配信 */
+    /* 18. 静的配信 */
     const index = await fetch(`${base}/`);
     assert.strictEqual(index.status, 200, 'GET / should serve the SPA page');
     const html = await index.text();

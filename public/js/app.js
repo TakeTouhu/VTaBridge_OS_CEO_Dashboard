@@ -74,6 +74,8 @@ function layout(title, content) {
         navLink('#/', 'ホーム'),
         navLink('#/projects', '案件'),
         navLink('#/deals', '商談'),
+        navLink('#/analytics', '売上分析'),
+        navLink('#/settings', '設定'),
       ]),
       el('div', { className: 'user' }, [
         el('span', { className: 'muted', textContent: currentUser ? currentUser.name : '' }),
@@ -99,6 +101,35 @@ function table(headers, rows) {
 
 /* ===== ホーム ===== */
 
+function kpiCard(label, value, delta) {
+  const children = [el('span', { className: 'muted', textContent: label }), el('strong', { textContent: value })];
+  if (delta !== undefined) {
+    const up = delta >= 0;
+    children.push(el('span', {
+      className: up ? 'delta-up' : 'delta-down',
+      textContent: `前月比 ${up ? '+' : ''}${Math.round(delta / 10000).toLocaleString()}万円`,
+    }));
+  }
+  return el('div', { className: 'kpi' }, children);
+}
+
+function riskList(risks) {
+  if (!risks.length) return el('p', { className: 'muted', textContent: '検知された危険はありません。' });
+  return el('ul', { className: 'risks' }, risks.map((r) => el('li', {}, [
+    el('span', { className: `level ${r.level}`, textContent: r.type }),
+    el('a', { href: r.link, textContent: r.text }),
+  ])));
+}
+
+function engineerList(engineers) {
+  if (!engineers.length) return el('p', { className: 'muted', textContent: 'エンジニアは設定画面から登録できます。' });
+  return el('div', { style: 'display:grid; gap:0.5rem' }, engineers.map((e) => el('div', { className: 'eng' }, [
+    el('span', { textContent: e.name }),
+    el('div', { className: 'loadbar' }, [el('div', { className: e.load >= 90 ? 'hot' : '', style: `width:${e.load}%` })]),
+    el('span', { className: 'muted', textContent: `${e.load}%` }),
+  ])));
+}
+
 async function renderHome() {
   const d = await api('/api/dashboard');
 
@@ -109,16 +140,201 @@ async function renderHome() {
       ])))
     : el('p', { className: 'muted', textContent: '今日やることはありません。' });
 
+  const k = d.kpi;
+  const kpis = el('div', { className: 'kpis' }, [
+    kpiCard('今月の受注額', man(k.orderAmount), k.orderAmount - k.orderAmountPrev),
+    kpiCard('今月の入金額', man(k.paidAmount), k.paidAmount - k.paidAmountPrev),
+    kpiCard('期日超過の未回収', k.unpaidAmount ? `${man(k.unpaidAmount)}(${k.unpaidCount}件)` : 'なし'),
+    kpiCard('進行中の商談', `${k.dealCount}件`),
+    kpiCard('見積提出中', `${k.quoteCount}件`),
+    kpiCard('契約待ち', `${k.awaitingContract}件`),
+    kpiCard('開発中の案件', `${k.inDevelopment}件`),
+    kpiCard('稼働エンジニア', `${k.activeEngineers}人`),
+  ]);
+
+  const chart = el('div');
   const pipe = el('div', { className: 'pipeline' }, d.pipeline.map((s) => el('div', { className: 'stage' }, [
     el('span', { className: 'muted', textContent: s.stage }),
     el('strong', { textContent: `${s.count}件` }),
     el('span', { className: 'muted', textContent: `${s.amount.toLocaleString()}万円` }),
   ])));
 
+  const sugg = d.suggestions.length
+    ? el('ul', { className: 'suggestions' }, d.suggestions.map((s) => el('li', {}, [
+        el('span', { textContent: s.icon }),
+        el('span', {}, [
+          el('span', { textContent: s.text }),
+          el('span', { className: 'muted', textContent: `(${s.reason})` }),
+        ]),
+      ])))
+    : el('p', { className: 'muted', textContent: '現在の提案はありません。' });
+
   layout('ホーム', el('div', {}, [
     section('今日やること(最大3件)', tasks),
+    section('危険案件', riskList(d.risks)),
+    section('KPI', kpis),
+    section('売上推移(6ヶ月・万円)', chart),
     section('営業パイプライン', pipe),
-    section('KPI・危険検知', el('p', { className: 'muted', textContent: 'Phase 3 で実装されます。' })),
+    section('エンジニア稼働状況', engineerList(d.engineers)),
+    section('AI営業アドバイス', sugg),
+  ]));
+
+  Charts.line(chart, {
+    labels: d.monthlySales.map((m) => m.month),
+    series: [
+      { name: '受注', color: '#38bdf8', values: d.monthlySales.map((m) => m.order) },
+      { name: '請求', color: '#facc15', values: d.monthlySales.map((m) => m.invoice) },
+      { name: '入金', color: '#4ade80', values: d.monthlySales.map((m) => m.paid) },
+    ],
+    format: (v) => `${v.toLocaleString()}万円`,
+  });
+}
+
+/* ===== 売上分析 ===== */
+
+async function renderAnalytics(months = 6) {
+  const { monthlySales } = await api(`/api/analytics?months=${months}`);
+
+  const tabs = el('div', { className: 'tabs' }, [3, 6, 12].map((n) => {
+    const b = el('button', { textContent: `${n}ヶ月`, className: n === months ? 'on' : 'secondary' });
+    b.addEventListener('click', () => renderAnalytics(n));
+    return b;
+  }));
+
+  const chart = el('div');
+  const rows = monthlySales.map((m) => el('tr', {}, [
+    el('td', { textContent: m.month }),
+    el('td', { textContent: `${m.order.toLocaleString()}万円` }),
+    el('td', { textContent: `${m.invoice.toLocaleString()}万円` }),
+    el('td', { textContent: `${m.paid.toLocaleString()}万円` }),
+  ]));
+
+  layout('売上分析', el('div', {}, [
+    section('期間', tabs),
+    section('受注・請求・入金の推移(万円)', chart),
+    section('月次テーブル', table(['月', '受注', '請求', '入金'], rows)),
+  ]));
+
+  Charts.line(chart, {
+    labels: monthlySales.map((m) => m.month),
+    series: [
+      { name: '受注', color: '#38bdf8', values: monthlySales.map((m) => m.order) },
+      { name: '請求', color: '#facc15', values: monthlySales.map((m) => m.invoice) },
+      { name: '入金', color: '#4ade80', values: monthlySales.map((m) => m.paid) },
+    ],
+    format: (v) => `${v.toLocaleString()}万円`,
+  });
+}
+
+/* ===== 設定 ===== */
+
+async function renderSettings() {
+  const [{ settings }, { engineers }] = await Promise.all([api('/api/settings'), api('/api/engineers')]);
+
+  /* 危険検知しきい値 */
+  const riskOn = el('input', { type: 'checkbox', checked: settings.riskDetect === '1' });
+  const unpaid = el('input', { type: 'number', min: 1, value: settings.unpaidDays });
+  const noReply = el('input', { type: 'number', min: 1, value: settings.noReplyDays });
+  const quoteFollow = el('input', { type: 'number', min: 1, value: settings.quoteFollowDays });
+  const thMsg = el('p', { className: 'muted' });
+  const thForm = el('form', { className: 'grid-form' }, [
+    el('label', { textContent: '危険検知を有効にする' }, [riskOn]),
+    el('label', { textContent: '未回収を重大とする日数' }, [unpaid]),
+    el('label', { textContent: '商談滞留の検知日数' }, [noReply]),
+    el('label', { textContent: '見積フォロー提案の日数' }, [quoteFollow]),
+    el('button', { type: 'submit', textContent: '保存' }), thMsg,
+  ]);
+  thForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    thMsg.textContent = '';
+    try {
+      await api('/api/settings', { method: 'PATCH', body: {
+        riskDetect: riskOn.checked ? '1' : '0', unpaidDays: unpaid.value,
+        noReplyDays: noReply.value, quoteFollowDays: quoteFollow.value,
+      } });
+      thMsg.textContent = '保存しました';
+    } catch (err) { thMsg.textContent = err.message; }
+  });
+
+  /* 自社情報 */
+  const cName = el('input', { value: settings.companyName });
+  const cAddr = el('input', { value: settings.companyAddress });
+  const cBank = el('input', { value: settings.bankInfo });
+  const coMsg = el('p', { className: 'muted' });
+  const coForm = el('form', { className: 'grid-form' }, [
+    el('label', { textContent: '会社名' }, [cName]),
+    el('label', { textContent: '住所' }, [cAddr]),
+    el('label', { textContent: '振込先' }, [cBank]),
+    el('button', { type: 'submit', textContent: '保存' }), coMsg,
+  ]);
+  coForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    coMsg.textContent = '';
+    try {
+      await api('/api/settings', { method: 'PATCH', body: { companyName: cName.value, companyAddress: cAddr.value, bankInfo: cBank.value } });
+      coMsg.textContent = '保存しました';
+    } catch (err) { coMsg.textContent = err.message; }
+  });
+
+  /* エンジニア管理 */
+  const engRows = engineers.map((eng) => {
+    const load = el('input', { type: 'number', min: 0, max: 100, value: eng.load, style: 'width:5rem' });
+    const proj = el('input', { value: eng.current_project, placeholder: '現在の案件', style: 'width:10rem' });
+    const save = el('button', { type: 'button', textContent: '保存', className: 'small' });
+    save.addEventListener('click', async () => {
+      await api(`/api/engineers/${eng.id}`, { method: 'PATCH', body: { load: Number(load.value), current_project: proj.value } }).catch(() => {});
+      renderSettings();
+    });
+    const toggle = el('button', { type: 'button', textContent: eng.active ? '無効化' : '有効化', className: 'secondary small' });
+    toggle.addEventListener('click', async () => {
+      await api(`/api/engineers/${eng.id}`, { method: 'PATCH', body: { active: !eng.active } }).catch(() => {});
+      renderSettings();
+    });
+    return el('tr', {}, [
+      el('td', { textContent: eng.name + (eng.active ? '' : '(無効)') }),
+      el('td', {}, [proj]),
+      el('td', {}, [load]),
+      el('td', {}, [save, toggle]),
+    ]);
+  });
+  const newEng = el('input', { placeholder: 'エンジニア名', required: true });
+  const engForm = el('form', { className: 'row' }, [newEng, el('button', { type: 'submit', textContent: '追加' })]);
+  engForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      await api('/api/engineers', { body: { name: newEng.value } });
+      renderSettings();
+    } catch { /* 入力エラーは無視 */ }
+  });
+
+  /* パスワード変更 */
+  const cur = el('input', { type: 'password', autocomplete: 'current-password' });
+  const next = el('input', { type: 'password', autocomplete: 'new-password' });
+  const pwMsg = el('p', { className: 'muted' });
+  const pwForm = el('form', { className: 'grid-form' }, [
+    el('label', { textContent: '現在のパスワード' }, [cur]),
+    el('label', { textContent: '新しいパスワード(8文字以上)' }, [next]),
+    el('button', { type: 'submit', textContent: '変更' }), pwMsg,
+  ]);
+  pwForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    pwMsg.textContent = '';
+    pwMsg.className = 'muted';
+    try {
+      await api('/api/auth/password', { body: { current: cur.value, next: next.value } });
+      pwMsg.textContent = '変更しました';
+      cur.value = next.value = '';
+    } catch (err) { pwMsg.textContent = err.message; pwMsg.className = 'error'; }
+  });
+
+  layout('設定', el('div', {}, [
+    section('危険検知', thForm),
+    section('自社情報', coForm),
+    section('エンジニア管理', el('div', {}, [
+      engineers.length ? table(['名前', '現在の案件', '稼働率(%)', ''], engRows) : el('p', { className: 'muted', textContent: 'エンジニアはまだ登録されていません。' }),
+      engForm,
+    ])),
+    section('パスワード変更', pwForm),
   ]));
 }
 
@@ -360,6 +576,8 @@ async function route() {
     else if ((m = /^#\/projects\/(\d+)$/.exec(hash))) await renderProjectDetail(m[1]);
     else if (hash === '#/deals') await renderDeals();
     else if ((m = /^#\/deals\/(\d+)$/.exec(hash))) await renderDealDetail(m[1]);
+    else if (hash === '#/analytics') await renderAnalytics();
+    else if (hash === '#/settings') await renderSettings();
     else await renderHome();
   } catch (err) {
     if (err.status === 401) { renderLogin(); return; }
