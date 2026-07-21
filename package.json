@@ -1,0 +1,28 @@
+{
+  "name": "vtabridge-os-ceo-dashboard",
+  "version": "1.0.0",
+  "description": "社長が**毎朝5分**で会社の状況と最優先タスクを把握し、AIによる意思決定支援を受けられるダッシュボード。 (設計書 v1.0 に基づく実装)",
+  "main": "server/server.js",
+  "scripts": {
+    "test": "node server/smoke-test.js",
+    "start": "node server/server.js",
+    "seed": "node server/seed.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "http://local_proxy@127.0.0.1:41729/git/TakeTouhu/VTaBridge_OS_CEO_Dashboard"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "type": "commonjs",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.111.0",
+    "bcryptjs": "^3.0.3",
+    "better-sqlite3": "^12.11.1",
+    "express": "^5.2.1",
+    "imapflow": "^1.4.7",
+    "mailparser": "^3.9.14",
+    "nodemailer": "^9.0.3"
+  }
+}
