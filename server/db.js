@@ -216,6 +216,7 @@ const DEFAULT_SETTINGS = {
   mailPollMinutes: "5",
   mailReplyHours: "24",
   mailSignature: "",
+  mailTemplate: "",
   mailCategories: "見積依頼,契約相談,質問,クレーム,請求・支払い,開発相談,日程調整,広告・不要メール,雑談,その他",
   followDays: "30",
   quoteFollowDays: "5",

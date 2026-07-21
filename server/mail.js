@@ -141,10 +141,11 @@ async function syncAll() {
 }
 
 /* 返信送信 */
-async function sendReply(email, text) {
+async function sendReply(email, text, customSubject) {
   const acc = db.prepare("SELECT * FROM mail_accounts WHERE id = ?").get(email.account_id);
   if (!acc) throw new Error("送信元アカウントが見つかりません(サンプルメールには送信できません)");
-  const subject = /^re:/i.test(email.subject) ? email.subject : `Re: ${email.subject}`;
+  const subject = (customSubject && customSubject.trim())
+    || (/^re:/i.test(email.subject) ? email.subject : `Re: ${email.subject}`);
   await smtpTransport(acc).sendMail({
     from: acc.username,
     to: email.from_address,
