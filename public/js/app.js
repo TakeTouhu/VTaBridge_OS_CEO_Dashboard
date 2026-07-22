@@ -850,7 +850,10 @@ async function renderMailDetail(id) {
       <div style="display:flex; flex-direction:column; gap:16px;">
         <div class="card">
           <h2>📝 返信ドラフト <span id="draft-src"></span></h2>
-          <textarea class="input" id="draft-text" rows="14" placeholder="「AIでドラフト作成」を押すか、直接入力してください">${esc(m.draft || "")}</textarea>
+          <label class="form-label">件名
+            <input class="input" id="draft-subject" value="${esc(m.reply_subject || (/^\s*[Rr][Ee]:/.test(m.subject || "") ? m.subject : "Re: " + (m.subject || "")))}">
+          </label>
+          <textarea class="input" id="draft-text" rows="13" placeholder="「AIでドラフト作成」を押すか、直接入力してください">${esc(m.draft || "")}</textarea>
           <label class="form-label" style="margin-top:8px;">AIへの指示(任意)
             <input class="input" id="draft-instructions" placeholder="例: 訪問日程を2案提示して">
           </label>
@@ -886,6 +889,7 @@ async function renderMailDetail(id) {
     try {
       const r = await Api.post(`/api/mail/${m.id}/draft`, { instructions: document.getElementById("draft-instructions").value });
       document.getElementById("draft-text").value = r.draft;
+      if (r.subject) document.getElementById("draft-subject").value = r.subject;
       document.getElementById("draft-src").innerHTML = aiBadge(r.source, r.model);
     } catch (err) {
       toast(err.message, true);
@@ -897,12 +901,13 @@ async function renderMailDetail(id) {
 
   document.getElementById("reply-send").addEventListener("click", async () => {
     const text = document.getElementById("draft-text").value.trim();
+    const subject = document.getElementById("draft-subject").value.trim();
     if (!text) { toast("返信内容が空です", true); return; }
     if (!confirm(`${m.from_address} 宛に返信を送信します。よろしいですか?`)) return;
     const btn = document.getElementById("reply-send");
     btn.disabled = true;
     try {
-      await Api.post(`/api/mail/${m.id}/reply`, { text });
+      await Api.post(`/api/mail/${m.id}/reply`, { text, subject });
       toast("返信を送信しました");
       renderMailDetail(id);
     } catch (err) {
@@ -1353,7 +1358,10 @@ async function renderSettings() {
       <label class="form-label" style="margin-top:8px;">メール署名(AI返信ドラフトの末尾に使用)
         <textarea class="input" id="mail-signature" rows="3" placeholder="例: 株式会社VTaBridge 山田太郎&#10;TEL: 03-xxxx-xxxx">${esc(settings.mailSignature || "")}</textarea>
       </label>
-      <button class="btn btn-primary btn-sm" id="mail-signature-save">署名・カテゴリを保存</button>
+      <label class="form-label">会社テンプレート・文体ルール(AI返信ドラフトに適用)
+        <textarea class="input" id="mail-template" rows="3" placeholder="例: 冒頭は「平素より大変お世話になっております。」で始める。結びは「何卒よろしくお願い申し上げます。」で締める。">${esc(settings.mailTemplate || "")}</textarea>
+      </label>
+      <button class="btn btn-primary btn-sm" id="mail-signature-save">署名・テンプレート・カテゴリを保存</button>
     </div>
 
     <div class="grid grid-2" style="margin-top:16px;">
@@ -1459,9 +1467,10 @@ async function renderSettings() {
   document.getElementById("mail-signature-save").addEventListener("click", async () => {
     await Api.patch("/api/settings", {
       mailSignature: document.getElementById("mail-signature").value,
+      mailTemplate: document.getElementById("mail-template").value,
       mailCategories: document.getElementById("mail-categories").value,
     });
-    toast("署名・カテゴリを保存しました");
+    toast("署名・テンプレート・カテゴリを保存しました");
   });
 
   document.getElementById("eng-add").addEventListener("click", async () => {

@@ -399,7 +399,8 @@ function registerApiRoutes(app) {
     if (!m) throw httpError(404, "メールが見つかりません");
     if (m.status === "replied") throw httpError(400, "既に返信済みです");
     const text = str(req.body?.text, { max: 20000, required: true });
-    await mail.sendReply(m, text);
+    const subject = str(req.body?.subject, { max: 500 });
+    await mail.sendReply(m, text, subject);
     res.json({ ok: true });
   });
 

@@ -257,7 +257,8 @@ function suggestions() {
     });
   }
   // 営業アドバイス: 疎遠になっている顧客のフォロー
-  const follow = customers().filter((c) => c.follow_recommended).slice(0, 1);
+  const custList = customers();
+  const follow = custList.filter((c) => c.follow_recommended).slice(0, 1);
   for (const c of follow) {
     out.push({
       icon: "🤝",
@@ -265,7 +266,40 @@ function suggestions() {
       reason: "顧客リレーション分析",
     });
   }
-  return out.slice(0, 4);
+  // 営業アドバイス: 返信速度が遅く失注リスク(進行中商談の顧客宛の未返信メールが滞留)
+  const slowReplyHours = Number(s2.mailReplyHours) || 24;
+  const slow = db.prepare(`
+    SELECT e.from_name, e.from_address, e.subject, e.received_at, d.client, d.title
+    FROM emails e
+    JOIN deals d ON (e.from_name != '' AND instr(e.from_name, d.client) > 0) OR e.project_id IN (SELECT id FROM projects WHERE client = d.client)
+    WHERE e.needs_reply = 1 AND e.status = 'open'
+      AND d.stage IN ('商談中','見積提出','契約待ち')
+      AND datetime(e.received_at) <= datetime('now', ?)
+    ORDER BY e.received_at LIMIT 1`).get(`-${slowReplyHours} hours`);
+  if (slow) {
+    const hours = Math.floor((Date.now() - new Date(slow.received_at)) / 3600000);
+    out.push({
+      icon: "⏱️",
+      text: `商談中の${slow.client}への返信が${hours}時間滞っています。返信速度が遅いと失注リスクが高まります。早めの対応を推奨します。`,
+      reason: "進行中商談の返信滞留を検知",
+    });
+  }
+  // 営業アドバイス: 追加提案(アップセル)の機会 — 保守中で開発案件がなく、直近クレームもない顧客
+  const upsell = db.prepare(`
+    SELECT DISTINCT p.client FROM projects p
+    WHERE p.status = '保守'
+      AND NOT EXISTS (SELECT 1 FROM projects p2 WHERE p2.client = p.client AND p2.status = '開発中')
+      AND NOT EXISTS (SELECT 1 FROM emails e WHERE e.category = 'クレーム' AND e.status = 'open' AND (e.from_name != '' AND instr(e.from_name, p.client) > 0))
+    LIMIT 1`).get();
+  if (upsell) {
+    const c = custList.find((x) => x.client === upsell.client);
+    out.push({
+      icon: "💡",
+      text: `${upsell.client}は保守フェーズで関係が安定しています${c && c.sales ? `(累計入金 ${Math.round(c.sales / 10000)}万円)` : ""}。追加開発や新サービスの提案ができそうです。`,
+      reason: "案件状況からアップセル機会を分析",
+    });
+  }
+  return out.slice(0, 5);
 }
 
 /* ===== AI Inbox: 今日対応すべき件数のサマリー ===== */
